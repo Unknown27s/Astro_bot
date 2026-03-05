@@ -23,7 +23,7 @@ st.set_page_config(
 from auth.auth import init_session_state, login, logout, register_user
 from views.chat import render_chat_page
 from views.admin import render_admin_page, render_ai_settings_page
-from config import MODEL_PATH, CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL
+from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 
 
 # ═══════════════════════════════════════════════════════
@@ -51,15 +51,16 @@ def _check_system_health() -> dict:
         else {"status": "warning", "message": "Will create on first use"}
     )
 
-    model_path = Path(MODEL_PATH)
-    if model_path.exists():
-        size_mb = model_path.stat().st_size / (1024 * 1024)
-        health["model_file"] = {"status": "ok", "message": f"{model_path.name} ({size_mb:.0f} MB)"}
-    else:
-        health["model_file"] = {"status": "error", "message": "GGUF model not found"}
-
-    from rag.generator import get_llm_status
-    health["llm"] = get_llm_status()
+    # LLM provider statuses
+    from rag.providers.manager import get_manager
+    mgr = get_manager()
+    provider_statuses = mgr.get_all_statuses()
+    meta = provider_statuses.pop("_mode", {})
+    mode = meta.get("mode", "local_only")
+    health["llm_mode"] = {"status": "ok", "message": mode}
+    for key in ("ollama", "grok", "gemini"):
+        if key in provider_statuses:
+            health[f"llm_{key}"] = provider_statuses[key]
 
     try:
         import sentence_transformers
@@ -95,8 +96,10 @@ def render_health_sidebar():
 
     with st.sidebar.expander("🔍 Status Details", expanded=(ok_count < total)):
         labels = {
-            "sqlite": "📦 DB", "chromadb": "🔮 VectorDB", "model_file": "📁 Model",
-            "llm": "🧠 LLM", "embeddings": "🔢 Embed", "uploads": "📂 Uploads",
+            "sqlite": "📦 DB", "chromadb": "🔮 VectorDB",
+            "llm_mode": "🔀 Mode", "llm_ollama": "🖥️ Ollama",
+            "llm_grok": "⚡ Grok", "llm_gemini": "💎 Gemini",
+            "embeddings": "🔢 Embed", "uploads": "📂 Uploads",
         }
         for key, label in labels.items():
             info = health.get(key, {"status": "error", "message": "?"})
@@ -280,7 +283,7 @@ def run_admin_dashboard():
     with st.sidebar:
         st.markdown(
             "<div style='padding:0.5rem;color:gray;font-size:0.75rem;text-align:center;'>"
-            "IMS AstroBot v1.0<br>Powered by RAG + llama.cpp</div>",
+            "IMS AstroBot v2.0<br>Powered by RAG + Ollama/Grok/Gemini</div>",
             unsafe_allow_html=True,
         )
 

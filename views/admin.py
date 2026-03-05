@@ -5,15 +5,17 @@ Document management + AI Settings page.
 
 import os
 import time
-import shutil
 import streamlit as st
 from pathlib import Path
-from datetime import datetime
 
 from config import (
-    UPLOAD_DIR, SUPPORTED_EXTENSIONS, MODEL_DIR, MODEL_PATH,
-    MODEL_N_CTX, MODEL_N_THREADS, MODEL_MAX_TOKENS, MODEL_TEMPERATURE,
+    UPLOAD_DIR, SUPPORTED_EXTENSIONS,
+    MODEL_MAX_TOKENS, MODEL_TEMPERATURE,
     EMBEDDING_MODEL, SYSTEM_PROMPT, BASE_DIR,
+    LLM_MODE, LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER,
+    OLLAMA_BASE_URL, OLLAMA_MODEL,
+    GROK_API_KEY, GROK_MODEL,
+    GEMINI_API_KEY, GEMINI_MODEL,
 )
 from database.db import get_all_documents, delete_document, add_document
 from ingestion.parser import parse_document
@@ -131,95 +133,191 @@ def _render_document_management():
 # ═══════════════════════════════════════════════════════
 
 def render_ai_settings_page():
-    """AI Settings — model upload/swap, parameters, system prompt."""
+    """AI Settings — LLM provider config, parameters, system prompt."""
 
     st.markdown("### 🤖 AI Settings")
     st.divider()
 
-    # ── Section 1: Current Model Info ──
-    st.subheader("📁 Current Model")
-    model_path = Path(MODEL_PATH)
-    if model_path.exists():
-        size_mb = model_path.stat().st_size / (1024 * 1024)
-        st.success(f"**{model_path.name}**  —  {size_mb:.0f} MB", icon="✅")
-    else:
-        st.warning(f"No model found at `{model_path}`", icon="⚠️")
+    # ══════════════════════════════════════════
+    # Section 1: LLM Mode
+    # ══════════════════════════════════════════
+    st.subheader("🔀 LLM Mode")
+    st.caption("Choose how AstroBot generates responses.")
 
-    # List all .gguf files in models/ directory
-    gguf_files = sorted(MODEL_DIR.glob("*.gguf"))
-    if gguf_files:
-        with st.expander("📂 Available GGUF models in `models/` directory"):
-            for f in gguf_files:
-                sz = f.stat().st_size / (1024 * 1024)
-                active = "✅" if f == model_path else "⬛"
-                st.markdown(f"{active} **{f.name}** — {sz:.0f} MB")
-    else:
-        st.info("No `.gguf` files found in the `models/` directory.")
-
-    # ── Section 2: Upload New GGUF Model ──
-    st.divider()
-    st.subheader("📤 Upload / Swap Model")
-    st.caption("Upload a `.gguf` model file. It will be saved to the `models/` directory.")
-
-    uploaded_model = st.file_uploader(
-        "Choose a GGUF model file",
-        type=["gguf"],
-        key="model_uploader",
-        help="Upload a quantized GGUF model (e.g., phi-3-mini-4k-instruct-q4.gguf)",
+    mode_options = ["local_only", "cloud_only", "hybrid"]
+    mode_labels = {
+        "local_only": "🖥️ Local Only (Ollama)",
+        "cloud_only": "☁️ Cloud Only (Grok / Gemini)",
+        "hybrid": "🔄 Hybrid (Primary + Fallback)",
+    }
+    current_mode_idx = mode_options.index(LLM_MODE) if LLM_MODE in mode_options else 0
+    selected_mode = st.radio(
+        "Mode",
+        mode_options,
+        index=current_mode_idx,
+        format_func=lambda x: mode_labels[x],
+        horizontal=True,
+        key="llm_mode_radio",
     )
+    if selected_mode != LLM_MODE:
+        _update_env_var("LLM_MODE", selected_mode)
+        _reset_providers()
+        st.success(f"✅ Mode changed to **{mode_labels[selected_mode]}**. Restart to apply.")
 
-    if uploaded_model:
-        st.info(f"File: **{uploaded_model.name}** ({uploaded_model.size / (1024 * 1024):.0f} MB)")
-
-        dest_path = MODEL_DIR / uploaded_model.name
-        overwrite = dest_path.exists()
-        if overwrite:
-            st.warning(f"⚠️ This will overwrite the existing file: `{uploaded_model.name}`")
-
-        if st.button(
-            "💾 Save & Activate Model" if not overwrite else "💾 Overwrite & Activate Model",
-            type="primary",
-            use_container_width=True,
-        ):
-            with st.spinner("Saving model file... This may take a while for large files."):
-                try:
-                    with open(dest_path, "wb") as f:
-                        f.write(uploaded_model.getbuffer())
-
-                    # Update .env to point to the new model
-                    _update_env_var("MODEL_PATH", f"models\\{uploaded_model.name}")
-
-                    st.success(f"✅ Model saved: `{dest_path.name}` ({dest_path.stat().st_size / (1024*1024):.0f} MB)")
-                    st.warning(
-                        "⚠️ **Restart required** — The model path in `.env` has been updated. "
-                        "Please restart the application to load the new model."
-                    )
-
-                    # Force LLM singleton to re-check on next load
-                    _reset_llm_singleton()
-
-                except Exception as e:
-                    st.error(f"Failed to save model: {e}")
-
-    # ── Section 3: Select Active Model (from existing files) ──
-    if len(gguf_files) > 1:
+    # ══════════════════════════════════════════
+    # Section 2: Provider Configuration
+    # ══════════════════════════════════════════
+    if selected_mode in ("cloud_only", "hybrid"):
         st.divider()
-        st.subheader("🔄 Switch Active Model")
-        current_name = model_path.name if model_path.exists() else "(none)"
-        model_names = [f.name for f in gguf_files]
-        default_idx = model_names.index(current_name) if current_name in model_names else 0
+        st.subheader("🔗 Provider Priority")
+        st.caption("Set which provider to try first, and which to fall back to.")
 
-        selected = st.selectbox("Select model", model_names, index=default_idx)
-        if selected != current_name:
-            if st.button("✅ Activate Selected Model", type="primary"):
-                _update_env_var("MODEL_PATH", f"models\\{selected}")
-                _reset_llm_singleton()
-                st.success(f"Switched to `{selected}`. **Restart required to load.**")
-                st.rerun()
+        provider_options = ["ollama", "grok", "gemini"]
+        provider_labels = {"ollama": "🖥️ Ollama (Local)", "grok": "⚡ Grok (xAI)", "gemini": "💎 Gemini (Google)"}
 
-    # ── Section 4: LLM Parameters ──
+        if selected_mode == "cloud_only":
+            cloud_options = ["grok", "gemini"]
+            cloud_labels = {k: provider_labels[k] for k in cloud_options}
+            primary_idx = cloud_options.index(LLM_PRIMARY_PROVIDER) if LLM_PRIMARY_PROVIDER in cloud_options else 0
+            new_primary = st.selectbox(
+                "Primary Provider", cloud_options, index=primary_idx,
+                format_func=lambda x: cloud_labels[x], key="primary_provider",
+            )
+            fallback_options = ["none"] + [p for p in cloud_options if p != new_primary]
+            fallback_labels = {"none": "❌ None", **cloud_labels}
+            fallback_idx = fallback_options.index(LLM_FALLBACK_PROVIDER) if LLM_FALLBACK_PROVIDER in fallback_options else 0
+            new_fallback = st.selectbox(
+                "Fallback Provider", fallback_options, index=fallback_idx,
+                format_func=lambda x: fallback_labels[x], key="fallback_provider",
+            )
+        else:  # hybrid
+            primary_idx = provider_options.index(LLM_PRIMARY_PROVIDER) if LLM_PRIMARY_PROVIDER in provider_options else 0
+            new_primary = st.selectbox(
+                "Primary Provider", provider_options, index=primary_idx,
+                format_func=lambda x: provider_labels[x], key="primary_provider",
+            )
+            fallback_options = ["none"] + [p for p in provider_options if p != new_primary]
+            fallback_labels = {"none": "❌ None (Ollama auto-fallback)", **provider_labels}
+            fallback_idx = fallback_options.index(LLM_FALLBACK_PROVIDER) if LLM_FALLBACK_PROVIDER in fallback_options else 0
+            new_fallback = st.selectbox(
+                "Fallback Provider", fallback_options, index=fallback_idx,
+                format_func=lambda x: fallback_labels[x], key="fallback_provider",
+            )
+
+        if new_primary != LLM_PRIMARY_PROVIDER or new_fallback != LLM_FALLBACK_PROVIDER:
+            if st.button("💾 Save Provider Priority", type="primary"):
+                _update_env_var("LLM_PRIMARY_PROVIDER", new_primary)
+                _update_env_var("LLM_FALLBACK_PROVIDER", new_fallback)
+                _reset_providers()
+                st.success("✅ Provider priority saved. Restart to apply.")
+
+    # ══════════════════════════════════════════
+    # Section 3: Ollama Settings
+    # ══════════════════════════════════════════
     st.divider()
-    st.subheader("⚙️ LLM Parameters")
+    st.subheader("🖥️ Ollama (Local LLM)")
+    st.caption("Configure the local Ollama server connection.")
+
+    with st.form("ollama_form"):
+        new_ollama_url = st.text_input("Ollama Server URL", value=OLLAMA_BASE_URL)
+        new_ollama_model = st.text_input(
+            "Model Name",
+            value=OLLAMA_MODEL,
+            help="e.g., qwen3:0.6b, llama3.2, mistral, gemma2",
+        )
+        save_ollama = st.form_submit_button("💾 Save Ollama Settings", use_container_width=True)
+        if save_ollama:
+            _update_env_var("OLLAMA_BASE_URL", new_ollama_url)
+            _update_env_var("OLLAMA_MODEL", new_ollama_model)
+            _reset_providers()
+            st.success("✅ Ollama settings saved. Restart to apply.")
+
+    if st.button("🔌 Test Ollama Connection", key="test_ollama"):
+        with st.spinner("Testing Ollama..."):
+            from rag.providers.ollama_provider import OllamaProvider
+            prov = OllamaProvider(OLLAMA_BASE_URL, OLLAMA_MODEL)
+            status = prov.get_status()
+            if status["status"] == "ok":
+                st.success(f"✅ {status['message']}")
+                models = prov.list_models()
+                if models:
+                    st.info(f"Available models: {', '.join(models)}")
+            elif status["status"] == "warning":
+                st.warning(f"⚠️ {status['message']}")
+            else:
+                st.error(f"❌ {status['message']}")
+
+    # ══════════════════════════════════════════
+    # Section 4: Grok Settings
+    # ══════════════════════════════════════════
+    st.divider()
+    st.subheader("⚡ Grok (xAI)")
+    st.caption("Configure xAI Grok cloud API access.")
+
+    with st.form("grok_form"):
+        new_grok_key = st.text_input(
+            "Grok API Key", value=GROK_API_KEY, type="password",
+            help="Get your API key from https://console.x.ai",
+        )
+        new_grok_model = st.text_input(
+            "Grok Model", value=GROK_MODEL,
+            help="e.g., grok-3, grok-3-mini",
+        )
+        save_grok = st.form_submit_button("💾 Save Grok Settings", use_container_width=True)
+        if save_grok:
+            _update_env_var("GROK_API_KEY", new_grok_key)
+            _update_env_var("GROK_MODEL", new_grok_model)
+            _reset_providers()
+            st.success("✅ Grok settings saved. Restart to apply.")
+
+    if st.button("🔌 Test Grok Connection", key="test_grok"):
+        with st.spinner("Testing Grok API..."):
+            from rag.providers.grok_provider import GrokProvider
+            prov = GrokProvider(GROK_API_KEY, GROK_MODEL)
+            status = prov.get_status()
+            if status["status"] == "ok":
+                st.success(f"✅ {status['message']}")
+            else:
+                st.error(f"❌ {status['message']}")
+
+    # ══════════════════════════════════════════
+    # Section 5: Gemini Settings
+    # ══════════════════════════════════════════
+    st.divider()
+    st.subheader("💎 Gemini (Google)")
+    st.caption("Configure Google Gemini cloud API access.")
+
+    with st.form("gemini_form"):
+        new_gemini_key = st.text_input(
+            "Gemini API Key", value=GEMINI_API_KEY, type="password",
+            help="Get your API key from https://aistudio.google.com/apikey",
+        )
+        new_gemini_model = st.text_input(
+            "Gemini Model", value=GEMINI_MODEL,
+            help="e.g., gemini-2.0-flash, gemini-1.5-pro",
+        )
+        save_gemini = st.form_submit_button("💾 Save Gemini Settings", use_container_width=True)
+        if save_gemini:
+            _update_env_var("GEMINI_API_KEY", new_gemini_key)
+            _update_env_var("GEMINI_MODEL", new_gemini_model)
+            _reset_providers()
+            st.success("✅ Gemini settings saved. Restart to apply.")
+
+    if st.button("🔌 Test Gemini Connection", key="test_gemini"):
+        with st.spinner("Testing Gemini API..."):
+            from rag.providers.gemini_provider import GeminiProvider
+            prov = GeminiProvider(GEMINI_API_KEY, GEMINI_MODEL)
+            status = prov.get_status()
+            if status["status"] == "ok":
+                st.success(f"✅ {status['message']}")
+            else:
+                st.error(f"❌ {status['message']}")
+
+    # ══════════════════════════════════════════
+    # Section 6: Generation Parameters
+    # ══════════════════════════════════════════
+    st.divider()
+    st.subheader("⚙️ Generation Parameters")
     st.caption("Adjust generation parameters. Changes are saved to `.env` and take effect on restart.")
 
     with st.form("llm_params_form"):
@@ -230,33 +328,23 @@ def render_ai_settings_page():
                 value=float(MODEL_TEMPERATURE), step=0.05,
                 help="Higher = more creative, lower = more focused",
             )
+        with col2:
             new_max_tokens = st.slider(
                 "Max Tokens", 64, 4096,
                 value=int(MODEL_MAX_TOKENS), step=64,
                 help="Maximum number of tokens in the response",
-            )
-        with col2:
-            new_n_ctx = st.slider(
-                "Context Size (n_ctx)", 512, 16384,
-                value=int(MODEL_N_CTX), step=512,
-                help="Context window size in tokens",
-            )
-            new_n_threads = st.slider(
-                "CPU Threads", 1, 16,
-                value=int(MODEL_N_THREADS), step=1,
-                help="Number of CPU threads for inference",
             )
 
         save_params = st.form_submit_button("💾 Save Parameters", use_container_width=True, type="primary")
         if save_params:
             _update_env_var("MODEL_TEMPERATURE", str(new_temp))
             _update_env_var("MODEL_MAX_TOKENS", str(new_max_tokens))
-            _update_env_var("MODEL_N_CTX", str(new_n_ctx))
-            _update_env_var("MODEL_N_THREADS", str(new_n_threads))
-            _reset_llm_singleton()
+            _reset_providers()
             st.success("✅ Parameters saved to `.env`. Restart to apply changes.")
 
-    # ── Section 5: System Prompt ──
+    # ══════════════════════════════════════════
+    # Section 7: System Prompt
+    # ══════════════════════════════════════════
     st.divider()
     st.subheader("📝 System Prompt")
     st.caption("Customize the system prompt that guides the LLM's behavior.")
@@ -271,7 +359,9 @@ def render_ai_settings_page():
         _update_env_var("SYSTEM_PROMPT", new_prompt)
         st.success("✅ System prompt saved. Restart to apply.")
 
-    # ── Section 6: Embedding Model ──
+    # ══════════════════════════════════════════
+    # Section 8: Embedding Model
+    # ══════════════════════════════════════════
     st.divider()
     st.subheader("🔢 Embedding Model")
     st.caption("Select the sentence-transformers model used for document embeddings.")
@@ -324,13 +414,11 @@ def _update_env_var(key: str, value: str):
     env_path.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
 
 
-def _reset_llm_singleton():
-    """Reset the LLM singleton so it reloads on next use."""
+def _reset_providers():
+    """Reset the provider manager singleton so it re-reads config on next use."""
     try:
-        from rag import generator
-        generator._llm_instance = None
-        generator._llm_checked = False
-        generator._llm_load_error = None
+        from rag.providers.manager import reset_manager
+        reset_manager()
     except Exception:
         pass
     # Also clear cached health data

@@ -3,8 +3,13 @@
 # Streamlit UI
 streamlit>=1.30.0
 
-# LLM via llama.cpp
-llama-cpp-python>=0.2.50
+# FastAPI REST API (Phase 2 — for Spring Boot integration)
+fastapi>=0.110.0
+uvicorn>=0.27.0
+python-multipart>=0.0.7
+
+# HTTP requests (for Ollama, Grok, Gemini API calls)
+requests>=2.31.0
 
 # Embeddings
 sentence-transformers>=2.2.0

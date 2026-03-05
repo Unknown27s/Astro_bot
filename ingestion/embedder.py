@@ -3,11 +3,15 @@ IMS AstroBot — Embedding & ChromaDB Storage
 Generates embeddings using sentence-transformers and stores in ChromaDB.
 """
 
+import os
 import threading
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+
+# Use cached model files without making network requests
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 # ── Thread-safe singletons ──
 _embedding_model = None
