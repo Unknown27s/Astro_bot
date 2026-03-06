@@ -25,11 +25,28 @@ models/*.gguf
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
 # OS
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# Node / React frontend
+react-frontend/node_modules/
+react-frontend/dist/
+react-frontend/.env
+react-frontend/.env.local
+
+# Spring Boot / Maven
+springboot-backend/target/
+springboot-backend/.mvn/
+springboot-backend/*.jar
+springboot-backend/*.log
+
+# Logs
+*.log
 
 # Temp files
 tmpclaude-*

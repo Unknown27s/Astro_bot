@@ -1,11 +1,16 @@
 package com.astrobot.config;
 
+import io.netty.channel.ChannelOption;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.web.reactive.function.client.WebClient;
 import org.springframework.web.servlet.config.annotation.CorsRegistry;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
+import reactor.netty.http.client.HttpClient;
+
+import java.time.Duration;
 
 @Configuration
 public class WebConfig implements WebMvcConfigurer {
@@ -27,8 +32,14 @@ public class WebConfig implements WebMvcConfigurer {
 
     @Bean
     public WebClient pythonApiClient() {
+        HttpClient httpClient = HttpClient.create()
+                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000)
+                .responseTimeout(Duration.ofSeconds(120));
+
         return WebClient.builder()
                 .baseUrl(pythonApiUrl)
+                .clientConnector(new ReactorClientHttpConnector(httpClient))
+                .codecs(config -> config.defaultCodecs().maxInMemorySize(16 * 1024 * 1024))
                 .build();
     }
 }

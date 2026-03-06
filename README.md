@@ -160,11 +160,92 @@ Update `MODEL_PATH` in `.env` to match the filename.
 
 ### 5. Run the App
 
+You have two options: the **full-stack setup** (React + Spring Boot + Python API) or the **Streamlit standalone** UI.
+
+---
+
+#### Option A: Full-Stack (React + Spring Boot + FastAPI)
+
+This runs three services. Open **three separate terminals** from the project root:
+
+**Terminal 1 — Python FastAPI RAG Server (port 8000)**
+
 ```bash
+# Activate virtual environment first
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
+# Start the FastAPI server
+uvicorn api_server:app --host 0.0.0.0 --port 8000 --reload
+```
+
+**Terminal 2 — Spring Boot Backend (port 8080)**
+
+```bash
+cd springboot-backend
+
+# Windows (using Maven wrapper):
+.\mvnw.cmd spring-boot:run
+
+# macOS/Linux:
+./mvnw spring-boot:run
+
+# Or if Maven is installed globally:
+mvn spring-boot:run
+```
+
+> Requires **Java 17+**. The Spring Boot backend proxies REST calls to the Python API at `http://localhost:8000`.
+
+**Terminal 3 — React Frontend (port 3000)**
+
+```bash
+cd react-frontend
+
+# Install dependencies (first time only)
+npm install
+
+# Start dev server
+npm run dev
+```
+
+Open **http://localhost:3000** in your browser.
+
+**Build React for Production:**
+
+```bash
+cd react-frontend
+npm run build    # outputs to dist/
+npm run preview  # preview the production build
+```
+
+---
+
+#### Option B: Streamlit Standalone UI (port 8501)
+
+```bash
+# Activate virtual environment first
+# Windows:
+.venv\Scripts\activate
+# macOS/Linux:
+source .venv/bin/activate
+
 streamlit run app.py
 ```
 
 Open **http://localhost:8501** in your browser.
+
+---
+
+### Port Summary
+
+| Service | Port | Command |
+|---|---|---|
+| Python FastAPI (RAG engine) | `8000` | `uvicorn api_server:app --port 8000 --reload` |
+| Spring Boot Backend | `8080` | `.\mvnw.cmd spring-boot:run` |
+| React Frontend | `3000` | `npm run dev` (from `react-frontend/`) |
+| Streamlit UI (standalone) | `8501` | `streamlit run app.py` |
 
 ---
 
@@ -200,8 +281,11 @@ Students and faculty can register via the login page.
 
 | Component | Technology |
 |---|---|
-| **Frontend** | Streamlit |
-| **LLM Inference** | llama-cpp-python (local GGUF models) |
+| **Frontend (Modern)** | React 18 + Vite |
+| **Frontend (Legacy)** | Streamlit |
+| **API Gateway** | Spring Boot 3.2 (Java 17) |
+| **RAG Engine** | FastAPI + Uvicorn |
+| **LLM Providers** | Ollama (local), Gemini, Grok |
 | **Embeddings** | sentence-transformers (`all-MiniLM-L6-v2`) |
 | **Vector Database** | ChromaDB (persistent, cosine similarity) |
 | **Relational Database** | SQLite |
