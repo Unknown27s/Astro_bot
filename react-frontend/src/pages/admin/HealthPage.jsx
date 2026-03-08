@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getHealth } from '../../services/api';
+import { getHealth, getProviderStatuses } from '../../services/api';
 import { RefreshCw, CheckCircle, XCircle, AlertTriangle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -18,6 +18,8 @@ const statusBadge = (status) => {
 export default function HealthPage() {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [providers, setProviders] = useState({});
+  const [loadingProviders, setLoadingProviders] = useState(false);
 
   const refresh = async () => {
     setLoading(true);
@@ -30,20 +32,36 @@ export default function HealthPage() {
     setLoading(false);
   };
 
+  const refreshProviders = async () => {
+    setLoadingProviders(true);
+    try {
+      const { data } = await getProviderStatuses();
+      const { _mode, ...rest } = data || {};
+      setProviders(rest);
+    } catch {
+      toast.error('Failed to fetch provider statuses');
+    }
+    setLoadingProviders(false);
+  };
+
   useEffect(() => { refresh(); }, []);
 
   if (!health && loading) return <div className="text-center" style={{ padding: 48 }}><span className="spinner" /></div>;
 
   const components = health?.components || {};
-  const providers = health?.providers || {};
 
   return (
     <div>
       <div className="flex items-center justify-between">
         <h2>💚 System Health</h2>
-        <button className="btn btn-ghost" onClick={refresh} disabled={loading}>
-          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
-        </button>
+        <div className="flex items-center gap-2">
+          <button className="btn btn-ghost" onClick={refresh} disabled={loading}>
+            <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh Core
+          </button>
+          <button className="btn btn-ghost" onClick={refreshProviders} disabled={loadingProviders}>
+            <RefreshCw size={16} className={loadingProviders ? 'spin' : ''} /> Check LLM Providers
+          </button>
+        </div>
       </div>
       <div className="divider" />
 
@@ -81,25 +99,27 @@ export default function HealthPage() {
       </div>
 
       {/* LLM Providers */}
-      {Object.keys(providers).length > 0 && (
-        <>
-          <h3 style={{ marginBottom: 8 }}>🤖 LLM Providers</h3>
-          <div className="grid-2" style={{ marginBottom: 16 }}>
-            {Object.entries(providers).map(([name, prov]) => (
-              <div className="card" key={name}>
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    {statusIcon(prov.status)}
-                    <strong style={{ textTransform: 'capitalize' }}>{name}</strong>
-                  </div>
-                  {statusBadge(prov.status)}
+      <h3 style={{ marginBottom: 8 }}>🤖 LLM Providers</h3>
+      {Object.keys(providers).length > 0 ? (
+        <div className="grid-2" style={{ marginBottom: 16 }}>
+          {Object.entries(providers).map(([name, prov]) => (
+            <div className="card" key={name}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  {statusIcon(prov.status)}
+                  <strong style={{ textTransform: 'capitalize' }}>{name}</strong>
                 </div>
-                {prov.model && <p className="text-sm text-muted" style={{ marginTop: 6 }}>Model: {prov.model}</p>}
-                {prov.message && <p className="text-sm text-muted" style={{ marginTop: 4 }}>{prov.message}</p>}
+                {statusBadge(prov.status)}
               </div>
-            ))}
-          </div>
-        </>
+              {prov.model && <p className="text-sm text-muted" style={{ marginTop: 6 }}>Model: {prov.model}</p>}
+              {prov.message && <p className="text-sm text-muted" style={{ marginTop: 4 }}>{prov.message}</p>}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted" style={{ marginBottom: 16 }}>
+          Providers not checked yet. Click "Check LLM Providers" to run these tests.
+        </p>
       )}
 
       {/* Raw JSON Toggle */}

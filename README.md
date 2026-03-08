@@ -89,15 +89,11 @@ RAG_Astrobot/
 │   └── generator.py        # LLM generation (llama-cpp-python) with fallback
 ├── models/                 # Place GGUF model files here
 │   └── (your-model.gguf)
-└── data/
+
     ├── uploads/            # Uploaded document files
     ├── chroma_db/          # ChromaDB persistent storage
     └── astrobot.db         # SQLite database
 ```
-
----
-
-## 🚀 Quick Start
 
 ### Prerequisites
 
@@ -119,15 +115,12 @@ python -m venv .venv
 # Activate (macOS/Linux)
 source .venv/bin/activate
 ```
-
 ### 2. Install Dependencies
 
 ```bash
-pip install -r requirements.txt
 ```
 
 ### 3. Configure Environment
-
 Copy the example `.env` file and edit as needed:
 
 ```bash
@@ -141,8 +134,6 @@ Key settings in `.env`:
 | `MODEL_PATH` | `models\phi-3-mini-4k-instruct-q4.gguf` | Path to GGUF model file |
 | `MODEL_TEMPERATURE` | `0.3` | LLM temperature (0 = focused, 2 = creative) |
 | `MODEL_MAX_TOKENS` | `512` | Max response length in tokens |
-| `MODEL_N_CTX` | `4096` | Context window size |
-| `MODEL_N_THREADS` | `4` | CPU threads for inference |
 | `EMBEDDING_MODEL` | `all-MiniLM-L6-v2` | Sentence-transformers model |
 | `ADMIN_USERNAME` | `admin` | Default admin username |
 | `ADMIN_PASSWORD` | `admin123` | Default admin password |
@@ -154,7 +145,6 @@ Download a quantized GGUF model and place it in the `models/` directory. Recomme
 - [Phi-3-mini-4k-instruct-Q4](https://huggingface.co/microsoft/Phi-3-mini-4k-instruct-gguf) (~2.3 GB)
 - [Mistral-7B-Instruct-Q4](https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF) (~4.1 GB)
 
-Update `MODEL_PATH` in `.env` to match the filename.
 
 > **Note:** The app works in **fallback mode** without a model — it returns retrieved context directly instead of generating answers.
 
@@ -285,7 +275,7 @@ Students and faculty can register via the login page.
 | **Frontend (Legacy)** | Streamlit |
 | **API Gateway** | Spring Boot 3.2 (Java 17) |
 | **RAG Engine** | FastAPI + Uvicorn |
-| **LLM Providers** | Ollama (local), Gemini, Grok |
+| **LLM Providers** | Ollama (local), Gemini, Groq |
 | **Embeddings** | sentence-transformers (`all-MiniLM-L6-v2`) |
 | **Vector Database** | ChromaDB (persistent, cosine similarity) |
 | **Relational Database** | SQLite |

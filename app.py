@@ -31,7 +31,7 @@ from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 # ═══════════════════════════════════════════════════════
 
 def _check_system_health() -> dict:
-    """Lightweight health checks — no model loading."""
+    """Lightweight health checks — no external LLM provider calls."""
     health = {}
     try:
         from database.db import get_connection
@@ -51,16 +51,8 @@ def _check_system_health() -> dict:
         else {"status": "warning", "message": "Will create on first use"}
     )
 
-    # LLM provider statuses
-    from rag.providers.manager import get_manager
-    mgr = get_manager()
-    provider_statuses = mgr.get_all_statuses()
-    meta = provider_statuses.pop("_mode", {})
-    mode = meta.get("mode", "local_only")
-    health["llm_mode"] = {"status": "ok", "message": mode}
-    for key in ("ollama", "grok", "gemini"):
-        if key in provider_statuses:
-            health[f"llm_{key}"] = provider_statuses[key]
+    # LLM mode only (no provider network calls here)
+    health["llm_mode"] = {"status": "ok", "message": LLM_MODE}
 
     try:
         import sentence_transformers
@@ -76,8 +68,26 @@ def _check_system_health() -> dict:
     return health
 
 
+def _check_llm_providers() -> dict:
+    """On-demand LLM provider health checks (can be slow / external)."""
+    from rag.providers.manager import get_manager
+
+    mgr = get_manager()
+    provider_statuses = mgr.get_all_statuses()
+    provider_statuses.pop("_mode", None)
+
+    results = {}
+    for key in ("ollama", "groq", "gemini"):
+        if key in provider_statuses:
+            results[key] = provider_statuses[key]
+    return results
+
+
 def render_health_sidebar():
-    """Show system health in sidebar (admin only)."""
+    """Show system health in sidebar (admin only).
+
+    Core components are always checked; LLM providers are on-demand.
+    """
     if "system_health" not in st.session_state:
         st.session_state.system_health = _check_system_health()
         st.session_state.health_check_time = datetime.now().strftime("%H:%M:%S")
@@ -95,18 +105,45 @@ def render_health_sidebar():
         st.sidebar.error(f"System: {err} issues", icon="❌") if err else st.sidebar.warning("Warnings", icon="⚠️")
 
     with st.sidebar.expander("🔍 Status Details", expanded=(ok_count < total)):
-        labels = {
-            "sqlite": "📦 DB", "chromadb": "🔮 VectorDB",
-            "llm_mode": "🔀 Mode", "llm_ollama": "🖥️ Ollama",
-            "llm_grok": "⚡ Grok", "llm_gemini": "💎 Gemini",
-            "embeddings": "🔢 Embed", "uploads": "📂 Uploads",
+        # Core components (fast, local checks)
+        core_labels = {
+            "sqlite": "📦 DB",
+            "chromadb": "🔮 VectorDB",
+            "llm_mode": "🔀 Mode",
+            "embeddings": "🔢 Embed",
+            "uploads": "📂 Uploads",
         }
-        for key, label in labels.items():
+        for key, label in core_labels.items():
             info = health.get(key, {"status": "error", "message": "?"})
             st.markdown(f"{icons.get(info['status'], '⚪')} **{label}**: {info['message']}")
+
         st.caption(f"Checked {st.session_state.get('health_check_time', '')}")
-        if st.button("🔄 Re-check", use_container_width=True, key="recheck"):
+        if st.button("🔄 Re-check Core", use_container_width=True, key="recheck_core"):
             st.session_state.system_health = _check_system_health()
+            st.session_state.health_check_time = datetime.now().strftime("%H:%M:%S")
+            st.rerun()
+
+        # On-demand LLM provider checks (can be slow / external)
+        st.markdown("---")
+        st.markdown("**🤖 LLM Providers (on-demand)**")
+        provider_health = st.session_state.get("llm_provider_health")
+        provider_labels = {
+            "ollama": "🖥️ Ollama",
+            "groq": "⚡ Groq",
+            "gemini": "💎 Gemini",
+        }
+        if provider_health:
+            for key, info in provider_health.items():
+                label = provider_labels.get(key, key)
+                st.markdown(
+                    f"{icons.get(info.get('status', 'warning'), '⚪')} "
+                    f"**{label}**: {info.get('message', '')}"
+                )
+        else:
+            st.caption("Providers not checked yet. Use the button below to run tests.")
+
+        if st.button("⚡ Check LLM Providers", use_container_width=True, key="recheck_llm"):
+            st.session_state.llm_provider_health = _check_llm_providers()
             st.session_state.health_check_time = datetime.now().strftime("%H:%M:%S")
             st.rerun()
 
@@ -283,7 +320,7 @@ def run_admin_dashboard():
     with st.sidebar:
         st.markdown(
             "<div style='padding:0.5rem;color:gray;font-size:0.75rem;text-align:center;'>"
-            "IMS AstroBot v2.0<br>Powered by RAG + Ollama/Grok/Gemini</div>",
+            "IMS AstroBot v2.0<br>Powered by RAG + Ollama/Groq/Gemini</div>",
             unsafe_allow_html=True,
         )
 

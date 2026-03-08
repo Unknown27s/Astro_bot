@@ -8,7 +8,7 @@ from typing import Optional
 
 from rag.providers.base import LLMProvider
 from rag.providers.ollama_provider import OllamaProvider
-from rag.providers.grok_provider import GrokProvider
+from rag.providers.groq_provider import GroqProvider
 from rag.providers.gemini_provider import GeminiProvider
 
 # Thread-safe singleton
@@ -49,7 +49,7 @@ class ProviderManager:
         from config import (
             LLM_MODE, LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER,
             OLLAMA_BASE_URL, OLLAMA_MODEL,
-            GROK_API_KEY, GROK_MODEL,
+            GROQ_API_KEY, GROQ_MODEL,
             GEMINI_API_KEY, GEMINI_MODEL,
         )
 
@@ -60,7 +60,7 @@ class ProviderManager:
         # Instantiate all providers (they lazy-connect on first use)
         self._providers: dict[str, LLMProvider] = {
             "ollama": OllamaProvider(OLLAMA_BASE_URL, OLLAMA_MODEL),
-            "grok": GrokProvider(GROK_API_KEY, GROK_MODEL),
+            "groq": GroqProvider(GROQ_API_KEY, GROQ_MODEL),
             "gemini": GeminiProvider(GEMINI_API_KEY, GEMINI_MODEL),
         }
 

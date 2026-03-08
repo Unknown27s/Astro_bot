@@ -17,7 +17,7 @@ from config import SQLITE_DB_PATH, ADMIN_USERNAME, ADMIN_PASSWORD
 
 def get_connection() -> sqlite3.Connection:
     """Get a SQLite connection with row factory."""
-    conn = sqlite3.connect(str(SQLITE_DB_PATH))
+    conn = sqlite3.connect(str(SQLITE_DB_PATH), timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
@@ -148,12 +148,22 @@ def toggle_user_active(user_id: str, is_active: bool) -> bool:
 
 
 def delete_user(user_id: str) -> bool:
-    """Delete a user by ID."""
+    """Delete a user by ID, including related records."""
     conn = get_connection()
-    conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-    conn.commit()
-    conn.close()
-    return True
+    try:
+        # Delete related query logs
+        conn.execute("DELETE FROM query_logs WHERE user_id = ?", (user_id,))
+        # Delete related documents
+        conn.execute("DELETE FROM documents WHERE uploaded_by = ?", (user_id,))
+        # Delete user
+        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
+        conn.commit()
+        return True
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
 
 
 # ═══════════════════════════════════════════

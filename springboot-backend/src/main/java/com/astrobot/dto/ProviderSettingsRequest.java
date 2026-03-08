@@ -9,8 +9,8 @@ public class ProviderSettingsRequest {
     private String fallbackProvider;
     private String ollamaBaseUrl;
     private String ollamaModel;
-    private String grokApiKey;
-    private String grokModel;
+    private String groqApiKey;
+    private String groqModel;
     private String geminiApiKey;
     private String geminiModel;
     private Double temperature;
