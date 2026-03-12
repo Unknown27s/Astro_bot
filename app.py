@@ -22,7 +22,7 @@ st.set_page_config(
 # ── Imports ──
 from auth.auth import init_session_state, login, logout, register_user
 from views.chat import render_chat_page
-from views.admin import render_admin_page, render_ai_settings_page
+from views.admin import render_admin_page, render_ai_settings_page, render_memory_page
 from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 
 
@@ -304,7 +304,7 @@ def run_admin_dashboard():
 
         page = st.radio(
             "Navigate",
-            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "💬 Test Chat"],
+            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "� Memory", "�💬 Test Chat"],
             label_visibility="collapsed",
         )
 
@@ -334,10 +334,14 @@ def run_admin_dashboard():
             _render_users_page()
         elif page == "🤖 AI Settings":
             render_ai_settings_page()
+        elif page == "� Memory":
+            render_memory_page()
         elif page == "💬 Test Chat":
             render_chat_page()
     except Exception as e:
         st.error(f"Error: {e}")
+        import traceback
+        st.code(traceback.format_exc(), language="text")
         import traceback
         st.code(traceback.format_exc(), language="text")
 

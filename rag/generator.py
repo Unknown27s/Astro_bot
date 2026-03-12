@@ -4,8 +4,9 @@ Routes queries through the configured LLM provider(s) via ProviderManager.
 Falls back to context-only mode if no provider is available.
 """
 
-from config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT
+from config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT, CONV_ENABLED
 from rag.providers.manager import get_manager, reset_manager
+from rag.memory import query_memory, add_memory_entry
 
 
 def get_llm_status() -> dict:
@@ -32,17 +33,35 @@ def is_llm_available() -> bool:
     return mgr.is_any_available()
 
 
-def generate_response(query: str, context: str) -> str:
+def generate_response(query: str, context: str, user_id: str = None, sources: list = None) -> dict:
     """
     Generate a response using the configured LLM provider(s) with retrieved context.
+    Checks conversation memory first for similar cached answers.
 
     Args:
         query: User's question
         context: Formatted context from retrieved documents
+        user_id: User ID for per-user memory scoping (optional)
+        sources: List of source documents used in context
 
     Returns:
-        Generated response string
+        Dictionary with keys: response (str), from_memory (bool), memory_id (str or None)
     """
+    # Step 1: Check conversation memory if enabled
+    if CONV_ENABLED and query:
+        try:
+            memory_result = query_memory(query, user_id=user_id)
+            if memory_result:
+                return {
+                    "response": memory_result["response"],
+                    "from_memory": True,
+                    "memory_id": memory_result.get("id")
+                }
+        except Exception as e:
+            # Memory check failed, continue with LLM generation
+            print(f"⚠️ Memory query failed: {e}")
+
+    # Step 2: Generate response via LLM provider
     mgr = get_manager()
 
     user_message = (
@@ -58,11 +77,38 @@ def generate_response(query: str, context: str) -> str:
         max_tokens=MODEL_MAX_TOKENS,
     )
 
-    if result:
-        return result
+    if not result:
+        # All providers failed — use fallback
+        result = _fallback_response(query, context)
 
-    # All providers failed — use fallback
-    return _fallback_response(query, context)
+    # Step 3: Store in memory for future queries (if enabled)
+    if CONV_ENABLED and query and result:
+        try:
+            memory_entry = add_memory_entry(
+                query=query,
+                response=result,
+                sources=sources or [],
+                user_id=user_id
+            )
+            return {
+                "response": result,
+                "from_memory": False,
+                "memory_id": memory_entry.get("id") if memory_entry else None
+            }
+        except Exception as e:
+            # Memory storage failed, but still return the response
+            print(f"⚠️ Failed to store in memory: {e}")
+            return {
+                "response": result,
+                "from_memory": False,
+                "memory_id": None
+            }
+
+    return {
+        "response": result,
+        "from_memory": False,
+        "memory_id": None
+    }
 
 
 def _fallback_response(query: str, context: str) -> str:

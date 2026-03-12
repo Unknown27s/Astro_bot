@@ -8,6 +8,7 @@ import streamlit as st
 from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
 from rag.generator import generate_response, is_llm_available
 from database.db import log_query
+from config import CONV_ENABLED
 
 
 def render_chat_page():
@@ -71,14 +72,31 @@ def render_chat_page():
                 # Step 2: Format context for LLM
                 context = format_context_for_llm(chunks)
 
-                # Step 3: Generate response
-                response = generate_response(prompt, context)
+                # Step 3: Generate response (with memory pre-check and post-store)
+                gen_result = generate_response(
+                    prompt, 
+                    context,
+                    user_id=st.session_state.user_id,
+                    sources=[c.get("source", "") for c in chunks]
+                )
+                
+                # Extract response from dict (handles both old string format and new dict format)
+                if isinstance(gen_result, dict):
+                    response = gen_result.get("response", "")
+                    from_memory = gen_result.get("from_memory", False)
+                else:
+                    response = gen_result  # Fallback for backward compatibility
+                    from_memory = False
 
                 # Step 4: Get citations
                 citations = get_source_citations(chunks)
 
                 elapsed_ms = (time.time() - start_time) * 1000
 
+            # Display memory cache indicator if from memory
+            if from_memory and CONV_ENABLED:
+                st.success("⚡ **Instant Response** (from memory cache)", icon="✨")
+            
             st.markdown(response)
 
             if citations:

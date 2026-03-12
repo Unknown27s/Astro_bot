@@ -16,8 +16,12 @@ from config import (
     OLLAMA_BASE_URL, OLLAMA_MODEL,
     GROQ_API_KEY, GROQ_MODEL,
     GEMINI_API_KEY, GEMINI_MODEL,
+    CONV_ENABLED,
 )
-from database.db import get_all_documents, delete_document, add_document
+from database.db import (
+    get_all_documents, delete_document, add_document,
+    get_memory_stats, cleanup_expired_memory, clear_all_memory, delete_memory,
+)
 from ingestion.parser import parse_document
 from ingestion.chunker import chunk_document
 from ingestion.embedder import store_chunks, delete_doc_chunks, get_collection_stats
@@ -424,3 +428,114 @@ def _reset_providers():
     # Also clear cached health data
     st.session_state.pop("system_health", None)
     st.session_state.pop("health_check_time", None)
+
+
+def render_memory_page():
+    """Render conversation memory management page."""
+    
+    if not CONV_ENABLED:
+        st.warning("💾 Conversation memory is currently disabled. Enable it in AI Settings.", icon="⚠️")
+        return
+    
+    st.markdown("### 💾 Conversation Memory Management")
+    st.caption("View, analyze, and manage semantic cached Q&A pairs")
+    st.divider()
+
+    # Tabs for different management views
+    tab1, tab2, tab3 = st.tabs(["📊 Statistics", "🗑️ Cleanup", "⚙️ Settings"])
+
+    # ── Tab 1: Statistics ──
+    with tab1:
+        st.subheader("Memory Statistics")
+        
+        try:
+            stats = get_memory_stats()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    "Total Entries",
+                    stats["total_entries"],
+                    help="Number of cached Q&A pairs"
+                )
+            with col2:
+                st.metric(
+                    "Avg Usage per Entry",
+                    f"{stats['avg_usage_per_entry']:.1f}x",
+                    help="Average number of times each entry was used"
+                )
+            with col3:
+                st.metric(
+                    "By User",
+                    len(stats["by_user"]),
+                    help="Number of users with cached entries"
+                )
+            
+            if stats["by_user"]:
+                st.subheader("Usage by User")
+                user_data = []
+                for item in stats["by_user"]:
+                    user_data.append({
+                        "User ID": item.get("user_id", "Global"),
+                        "Entries": item.get("cnt", 0),
+                        "Total Usage": item.get("total_usage", 0),
+                    })
+                st.dataframe(user_data, use_container_width=True)
+            else:
+                st.info("No cached entries yet. They will be created as queries are answered.", icon="ℹ️")
+        
+        except Exception as e:
+            st.error(f"Error loading statistics: {e}")
+
+    # ── Tab 2: Cleanup ──
+    with tab2:
+        st.subheader("Manual Cleanup")
+        st.caption("Remove expired or low-usage entries from cache")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🧹 Run Cleanup", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Cleaning up expired entries..."):
+                        deleted = cleanup_expired_memory()
+                    st.success(f"✅ Cleanup complete: {deleted} entries removed", icon="✅")
+                except Exception as e:
+                    st.error(f"Cleanup failed: {e}")
+        
+        with col2:
+            if st.button("🗑️ Clear All Memory", type="secondary", use_container_width=True):
+                if st.session_state.get("confirm_clear_memory", False):
+                    try:
+                        with st.spinner("Clearing all memory..."):
+                            total = clear_all_memory()
+                        st.success(f"✅ All memory cleared: {total} entries deleted", icon="✅")
+                        st.session_state["confirm_clear_memory"] = False
+                    except Exception as e:
+                        st.error(f"Clear failed: {e}")
+                else:
+                    st.warning("Click again to confirm clearing ALL memory", icon="⚠️")
+                    st.session_state["confirm_clear_memory"] = True
+
+    # ── Tab 3: Settings ──
+    with tab3:
+        st.subheader("Memory Configuration")
+        
+        try:
+            import config
+            
+            st.info(
+                f"""
+                **Current Settings:**
+                - **Status**: {'Enabled ✅' if CONV_ENABLED else 'Disabled ⚠️'}
+                - **Similarity Threshold**: {config.CONV_MATCH_THRESHOLD}
+                - **TTL (Days)**: {config.CONV_TTL_DAYS}
+                - **Min Usage to Keep**: {config.CONV_MIN_USAGE_FOR_KEEP}
+                - **Per-User Memory**: {'Yes' if config.CONV_PER_USER else 'No (Global)'}
+                
+                Edit these settings in `.env` and restart the server.
+                """,
+                icon="⚙️"
+            )
+        except Exception as e:
+            st.warning(f"Could not load config: {e}")

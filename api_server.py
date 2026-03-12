@@ -24,10 +24,12 @@ from database.db import (
     init_db, authenticate_user, create_user, get_all_users,
     toggle_user_active, delete_user, add_document, get_all_documents,
     delete_document, log_query, get_query_logs, get_analytics, get_connection,
+    store_memory, delete_memory, cleanup_expired_memory, invalidate_memory_by_source,
+    get_memory_stats, clear_all_memory,
 )
 from config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
-    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR,
+    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED,
 )
 
 init_db()
@@ -147,30 +149,36 @@ def api_chat(req: ChatRequest):
     # Step 2: Format context for LLM
     context = format_context_for_llm(chunks)
 
-    # Step 3: Generate response
-    response = generate_response(req.query, context)
+    # Step 3: Generate response (now includes memory handling)
+    gen_result = generate_response(req.query, context, user_id=req.user_id, sources=[c.get("source", "") for c in chunks])
+    
+    # Extract response from dict
+    response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+    from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
+    memory_id = gen_result.get("memory_id") if isinstance(gen_result, dict) else None
 
     # Step 4: Get citations
     citations = get_source_citations(chunks)
 
     elapsed_ms = (time.time() - start_time) * 1000
 
-    # Log query
+    # Log query (but note if from memory for analytics)
     try:
         source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
-        log_query(
-            user_id=req.user_id,
-            username=req.username,
-            query_text=req.query,
-            response_text=response[:500],
-            sources=source_names,
-            response_time_ms=elapsed_ms,
-        )
+        if not from_memory:  # Don't log cache hits to reduce clutter
+            log_query(
+                user_id=req.user_id,
+                username=req.username,
+                query_text=req.query,
+                response_text=response_text[:500],
+                sources=source_names,
+                response_time_ms=elapsed_ms,
+            )
     except Exception as e:
         print(f"[API] Error logging query: {e}")
 
     return ChatResponse(
-        response=response,
+        response=response_text,
         sources=chunks,
         citations=citations,
         response_time_ms=round(elapsed_ms, 1),
@@ -194,12 +202,20 @@ def api_chat_status():
 @app.post("/api/documents/upload")
 def api_upload_document(
     file: UploadFile = File(...),
-    uploaded_by: str = Form(...),
+    uploaded_by: str = Form(None),  # Make it optional with default None
 ):
     """Upload, parse, chunk, and index a document."""
     from ingestion.parser import parse_document
     from ingestion.chunker import chunk_document
     from ingestion.embedder import store_chunks
+
+    # Validate uploaded_by exists if provided
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+        if not user:
+            raise HTTPException(status_code=400, detail=f"User ID {uploaded_by} not found")
 
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in SUPPORTED_EXTENSIONS:
@@ -389,6 +405,25 @@ def api_health():
             "message": "Directory missing",
         }
 
+    # Conversation memory (if enabled)
+    if CONV_ENABLED:
+        try:
+            mem_stats = get_memory_stats()
+            components["memory"] = {
+                "status": "ok",
+                "message": f"{mem_stats['total_entries']} cached entries",
+            }
+        except Exception as e:
+            components["memory"] = {
+                "status": "warning",
+                "message": f"Error: {str(e)}",
+            }
+    else:
+        components["memory"] = {
+            "status": "warning",
+            "message": "Disabled",
+        }
+
     # Overall status aggregation
     overall_status = "healthy"
     for comp in components.values():
@@ -547,6 +582,61 @@ def _reload_config_module():
     import importlib
     import config
     importlib.reload(config)
+
+
+# ═══════════════════════════════════════════════════════
+# CONVERSATION MEMORY ENDPOINTS (Admin)
+# ═══════════════════════════════════════════════════════
+
+@app.get("/api/memory/stats")
+def api_memory_stats():
+    """Get statistics on conversation memory usage."""
+    if not CONV_ENABLED:
+        return {"enabled": False, "message": "Conversation memory is disabled"}
+    try:
+        stats = get_memory_stats()
+        return {"enabled": True, "stats": stats}
+    except Exception as e:
+        return {"enabled": True, "error": str(e)}
+
+
+@app.delete("/api/memory/{memory_id}")
+def api_delete_memory(memory_id: str):
+    """Delete a specific memory entry by ID."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        success = delete_memory(memory_id)
+        if success:
+            return {"deleted": True, "id": memory_id}
+        else:
+            raise HTTPException(status_code=404, detail="Memory entry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/cleanup")
+def api_memory_cleanup():
+    """Trigger manual cleanup of expired memory entries."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        deleted = cleanup_expired_memory()
+        return {"deleted": deleted, "message": f"Cleaned up {deleted} expired entries"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/clear")
+def api_memory_clear():
+    """Clear all conversation memory entries (admin only, use with caution)."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        total = clear_all_memory()
+        return {"cleared": True, "total_deleted": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ═══════════════════════════════════════════════════════

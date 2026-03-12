@@ -78,6 +78,33 @@ def init_db():
         )
     """)
 
+    # ── Conversation memory table (for semantic caching) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_memory (
+            id TEXT PRIMARY KEY,
+            query_text TEXT NOT NULL,
+            response_text TEXT NOT NULL,
+            sources TEXT,
+            user_id TEXT,
+            usage_count INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            last_accessed TEXT,
+            expires_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Create index for faster queries
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_memory_user 
+        ON conversation_memory(user_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_memory_expires 
+        ON conversation_memory(expires_at)
+    """)
+
     # ── Create default admin if not exists ──
     admin_exists = cursor.execute(
         "SELECT 1 FROM users WHERE username = ?", (ADMIN_USERNAME,)
@@ -263,6 +290,133 @@ def get_analytics() -> dict:
         "daily_queries": [dict(d) for d in daily_queries],
         "top_users": [dict(u) for u in top_users],
     }
+
+
+# ═══════════════════════════════════════════
+# CONVERSATION MEMORY (Semantic Cache)
+# ═══════════════════════════════════════════
+
+def store_memory(memory_id: str, query_text: str, response_text: str, sources: str, user_id: str = None, expires_at: str = None):
+    """Store a conversation memory entry in SQLite."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO conversation_memory 
+               (id, query_text, response_text, sources, user_id, created_at, last_accessed, expires_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (memory_id, query_text, response_text, sources, user_id, datetime.now().isoformat(), datetime.now().isoformat(), expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_memory_usage(memory_id: str):
+    """Increment usage count and update last_accessed timestamp."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
+            (datetime.now().isoformat(), memory_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_memory(memory_id: str) -> bool:
+    """Delete a memory entry by ID."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM conversation_memory WHERE id = ?", (memory_id,))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def cleanup_expired_memory() -> int:
+    """Delete expired memory entries and low-usage old entries. Returns count deleted."""
+    from config import CONV_TTL_DAYS, CONV_MIN_USAGE_FOR_KEEP
+    
+    conn = get_connection()
+    try:
+        # Delete entries past TTL (unless high usage)
+        cursor = conn.execute(
+            """DELETE FROM conversation_memory 
+               WHERE expires_at IS NOT NULL AND expires_at < ? 
+               AND usage_count < ?""",
+            (datetime.now().isoformat(), CONV_MIN_USAGE_FOR_KEEP),
+        )
+        deleted_ttl = cursor.rowcount
+        
+        # Also delete very old entries (>180 days) regardless of usage
+        cursor = conn.execute(
+            """DELETE FROM conversation_memory 
+               WHERE created_at < datetime('now', '-180 days')""",
+        )
+        deleted_old = cursor.rowcount
+        
+        conn.commit()
+        return deleted_ttl + deleted_old
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def invalidate_memory_by_source(source_doc: str):
+    """Delete memory entries that reference a specific source document. Returns count deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM conversation_memory WHERE sources LIKE ?",
+            (f"%{source_doc}%",),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_memory_stats() -> dict:
+    """Get statistics about stored memories."""
+    conn = get_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) as cnt FROM conversation_memory").fetchone()["cnt"]
+        by_user = conn.execute("""
+            SELECT user_id, COUNT(*) as cnt, SUM(usage_count) as total_usage 
+            FROM conversation_memory 
+            GROUP BY user_id
+        """).fetchall()
+        avg_usage = conn.execute("SELECT AVG(usage_count) as avg FROM conversation_memory").fetchone()["avg"]
+        
+        return {
+            "total_entries": total,
+            "avg_usage_per_entry": round(avg_usage, 2) if avg_usage else 0,
+            "by_user": [dict(row) for row in by_user],
+        }
+    finally:
+        conn.close()
+
+
+def clear_all_memory() -> int:
+    """Clear all conversation memory entries. Returns count deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM conversation_memory")
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
 
 
 # Initialize on import

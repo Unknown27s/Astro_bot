@@ -67,3 +67,25 @@ You answer questions based ONLY on the provided institutional documents and cont
 If the context does not contain enough information to answer the question, say so clearly.
 Do not make up information. Always be concise, professional, and helpful.
 If citing specific regulations or policies, mention the source document when possible."""
+
+# ── Conversation Memory (Semantic Cache) ──
+# Enable/disable memory feature
+CONV_ENABLED = os.getenv("CONV_ENABLED", "true").lower() == "true"
+# Similarity threshold for matching cached responses (0.0 to 1.0; higher = stricter)
+CONV_MATCH_THRESHOLD = float(os.getenv("CONV_MATCH_THRESHOLD", "0.88"))
+# ChromaDB collection name for storing conversation memory
+CONV_PERSIST_COLLECTION = os.getenv("CONV_PERSIST_COLLECTION", "conversation_memory")
+# If True, memory is per-user; if False, memory is global (shared)
+CONV_PER_USER = os.getenv("CONV_PER_USER", "false").lower() == "true"
+# TTL for memory entries (days); entries older than this are cleaned up
+CONV_TTL_DAYS = int(os.getenv("CONV_TTL_DAYS", "90"))
+# Minimum usage count to keep entry during pruning
+CONV_MIN_USAGE_FOR_KEEP = int(os.getenv("CONV_MIN_USAGE_FOR_KEEP", "1"))
+
+# ── Conversation Memory (Semantic Cache) ──
+CONV_ENABLED = os.getenv("CONV_ENABLED", "true").lower() == "true"
+CONV_MATCH_THRESHOLD = float(os.getenv("CONV_MATCH_THRESHOLD", "0.88"))
+CONV_PERSIST_COLLECTION = os.getenv("CONV_PERSIST_COLLECTION", "conversation_memory")
+CONV_PER_USER = os.getenv("CONV_PER_USER", "false").lower() == "true"
+CONV_TTL_DAYS = int(os.getenv("CONV_TTL_DAYS", "90"))
+CONV_MIN_USAGE_FOR_KEEP = int(os.getenv("CONV_MIN_USAGE_FOR_KEEP", "1"))
