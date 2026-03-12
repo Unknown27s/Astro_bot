@@ -13,6 +13,21 @@ export default function AnalyticsPage() {
 
   if (!analytics) return <div className="text-center" style={{ padding: 48 }}><span className="spinner" /></div>;
 
+  const dailyData = Array.isArray(analytics.daily_queries)
+    ? analytics.daily_queries.map((item) => {
+        if (Array.isArray(item)) {
+          const [day, cnt] = item;
+          return { date: day, count: cnt };
+        }
+        return {
+          date: item.day ?? item.date,
+          count: item.cnt ?? item.count,
+        };
+      })
+    : [];
+
+  const topUsers = Array.isArray(analytics.top_users) ? analytics.top_users : [];
+
   return (
     <div>
       <h2>📊 Usage Analytics</h2>
@@ -39,11 +54,11 @@ export default function AnalyticsPage() {
       </div>
 
       {/* Chart */}
-      {analytics.daily_queries?.length > 0 && (
+      {dailyData.length > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 16 }}>Queries Per Day (Last 7 Days)</h3>
           <ResponsiveContainer width="100%" height={250}>
-            <BarChart data={analytics.daily_queries.map(([date, count]) => ({ date, count }))}>
+            <BarChart data={dailyData}>
               <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 12 }} />
               <YAxis tick={{ fill: '#94a3b8', fontSize: 12 }} />
               <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid #334155', borderRadius: 8 }} />
@@ -54,13 +69,13 @@ export default function AnalyticsPage() {
       )}
 
       {/* Top Users */}
-      {analytics.top_users?.length > 0 && (
+      {topUsers.length > 0 && (
         <div className="card" style={{ marginBottom: 24 }}>
           <h3 style={{ marginBottom: 12 }}>Top Querying Users</h3>
-          {analytics.top_users.map(([name, count], i) => (
+          {topUsers.map((item, i) => (
             <div key={i} className="table-row">
-              <span style={{ flex: 1 }}>{name}</span>
-              <span className="badge badge-ok">{count} queries</span>
+              <span style={{ flex: 1 }}>{item.username ?? item[0]}</span>
+              <span className="badge badge-ok">{(item.cnt ?? item.count ?? item[1])} queries</span>
             </div>
           ))}
         </div>

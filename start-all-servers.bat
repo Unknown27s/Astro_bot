@@ -67,7 +67,7 @@ timeout /t 3 /nobreak
 
 REM 3. Start Spring Boot
 echo 3. Starting Spring Boot Backend...
-start "AstroBot - Spring Boot" cmd /k "cd springboot-backend && mvn spring-boot:run"
+start "AstroBot - Spring Boot" cmd /k "cd springboot-backend && .\mvnw.cmd spring-boot:run"
 echo    - Running on http://localhost:8080
 echo    - New terminal window opened
 echo.

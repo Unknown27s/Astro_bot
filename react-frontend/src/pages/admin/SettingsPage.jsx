@@ -26,8 +26,8 @@ export default function SettingsPage() {
     if (form.fallback_provider !== settings.fallback_provider) payload.fallback_provider = form.fallback_provider;
     if (form.ollama_base_url !== settings.ollama_base_url) payload.ollama_base_url = form.ollama_base_url;
     if (form.ollama_model !== settings.ollama_model) payload.ollama_model = form.ollama_model;
-    if (form.grok_api_key) payload.grok_api_key = form.grok_api_key;
-    if (form.grok_model !== settings.grok_model) payload.grok_model = form.grok_model;
+    if (form.groq_api_key) payload.groq_api_key = form.groq_api_key;
+    if (form.groq_model !== settings.groq_model) payload.groq_model = form.groq_model;
     if (form.gemini_api_key) payload.gemini_api_key = form.gemini_api_key;
     if (form.gemini_model !== settings.gemini_model) payload.gemini_model = form.gemini_model;
     if (form.temperature !== settings.temperature) payload.temperature = form.temperature;
@@ -91,7 +91,7 @@ export default function SettingsPage() {
         </div>
         <p className="text-sm text-muted" style={{ marginTop: 8 }}>
           {form.llm_mode === 'local_only' && 'Uses Ollama (local) only.'}
-          {form.llm_mode === 'cloud_only' && 'Uses cloud providers (Grok/Gemini). Primary → Fallback.'}
+          {form.llm_mode === 'cloud_only' && 'Uses cloud providers (Groq/Gemini). Primary → Fallback.'}
           {form.llm_mode === 'hybrid' && 'Uses primary provider → fallback → Ollama as last resort.'}
         </p>
       </div>
@@ -105,8 +105,7 @@ export default function SettingsPage() {
               <label>Primary Provider</label>
               <select value={form.primary_provider} onChange={e => update('primary_provider', e.target.value)}>
                 <option value="ollama">Ollama (Local)</option>
-                <option value="grok">Grok (xAI)</option>
-                <option value="gemini">Gemini (Google)</option>
+                <option value="groq">Groq</option>
               </select>
             </div>
             <div>
@@ -114,7 +113,7 @@ export default function SettingsPage() {
               <select value={form.fallback_provider} onChange={e => update('fallback_provider', e.target.value)}>
                 <option value="none">None</option>
                 <option value="ollama">Ollama (Local)</option>
-                <option value="grok">Grok (xAI)</option>
+                <option value="groq">Groq</option>
                 <option value="gemini">Gemini (Google)</option>
               </select>
             </div>
@@ -150,26 +149,26 @@ export default function SettingsPage() {
         )}
       </div>
 
-      {/* Grok Settings */}
+      {/* Groq Settings */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div className="flex items-center justify-between">
-          <h3>⚡ Grok (xAI)</h3>
+          <h3>⚡ Groq</h3>
           <div className="flex items-center gap-2">
-            <StatusIcon result={testResults.grok} />
-            <button className="btn btn-ghost btn-sm" onClick={() => handleTest('grok')} disabled={testing.grok}>
-              {testing.grok ? <><span className="spinner" /> Testing...</> : <><Zap size={14} /> Test</>}
+            <StatusIcon result={testResults.groq} />
+            <button className="btn btn-ghost btn-sm" onClick={() => handleTest('groq')} disabled={testing.groq}>
+              {testing.groq ? <><span className="spinner" /> Testing...</> : <><Zap size={14} /> Test</>}
             </button>
           </div>
         </div>
         <div className="grid-2" style={{ marginTop: 12 }}>
           <div>
-            <label>API Key {settings.grok_api_key_set && <span className="badge badge-ok" style={{ marginLeft: 4 }}>Set</span>}</label>
-            <input type="password" value={form.grok_api_key || ''} onChange={e => update('grok_api_key', e.target.value)}
-              placeholder={settings.grok_api_key_set ? '••••••••' : 'Enter Grok API key'} />
+            <label>API Key {settings.groq_api_key_set && <span className="badge badge-ok" style={{ marginLeft: 4 }}>Set</span>}</label>
+            <input type="password" value={form.groq_api_key || ''} onChange={e => update('groq_api_key', e.target.value)}
+              placeholder={settings.groq_api_key_set ? '••••••••' : 'Enter Groq API key'} />
           </div>
           <div>
             <label>Model</label>
-            <input value={form.grok_model || ''} onChange={e => update('grok_model', e.target.value)} placeholder="grok-3" />
+            <input value={form.groq_model || ''} onChange={e => update('groq_model', e.target.value)} placeholder="llama-3.3-70b-versatile" />
           </div>
         </div>
       </div>

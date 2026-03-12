@@ -14,7 +14,7 @@ from config import (
     EMBEDDING_MODEL, SYSTEM_PROMPT, BASE_DIR,
     LLM_MODE, LLM_PRIMARY_PROVIDER, LLM_FALLBACK_PROVIDER,
     OLLAMA_BASE_URL, OLLAMA_MODEL,
-    GROK_API_KEY, GROK_MODEL,
+    GROQ_API_KEY, GROQ_MODEL,
     GEMINI_API_KEY, GEMINI_MODEL,
 )
 from database.db import get_all_documents, delete_document, add_document
@@ -147,7 +147,7 @@ def render_ai_settings_page():
     mode_options = ["local_only", "cloud_only", "hybrid"]
     mode_labels = {
         "local_only": "🖥️ Local Only (Ollama)",
-        "cloud_only": "☁️ Cloud Only (Grok / Gemini)",
+        "cloud_only": "☁️ Cloud Only (Groq / Gemini)",
         "hybrid": "🔄 Hybrid (Primary + Fallback)",
     }
     current_mode_idx = mode_options.index(LLM_MODE) if LLM_MODE in mode_options else 0
@@ -172,11 +172,11 @@ def render_ai_settings_page():
         st.subheader("🔗 Provider Priority")
         st.caption("Set which provider to try first, and which to fall back to.")
 
-        provider_options = ["ollama", "grok", "gemini"]
-        provider_labels = {"ollama": "🖥️ Ollama (Local)", "grok": "⚡ Grok (xAI)", "gemini": "💎 Gemini (Google)"}
+        provider_options = ["ollama", "groq", "gemini"]
+        provider_labels = {"ollama": "🖥️ Ollama (Local)", "groq": "⚡ Groq", "gemini": "💎 Gemini (Google)"}
 
         if selected_mode == "cloud_only":
-            cloud_options = ["grok", "gemini"]
+            cloud_options = ["groq", "gemini"]
             cloud_labels = {k: provider_labels[k] for k in cloud_options}
             primary_idx = cloud_options.index(LLM_PRIMARY_PROVIDER) if LLM_PRIMARY_PROVIDER in cloud_options else 0
             new_primary = st.selectbox(
@@ -248,32 +248,32 @@ def render_ai_settings_page():
                 st.error(f"❌ {status['message']}")
 
     # ══════════════════════════════════════════
-    # Section 4: Grok Settings
+    # Section 4: Groq Settings
     # ══════════════════════════════════════════
     st.divider()
-    st.subheader("⚡ Grok (xAI)")
-    st.caption("Configure xAI Grok cloud API access.")
+    st.subheader("⚡ Groq")
+    st.caption("Configure Groq cloud API access.")
 
-    with st.form("grok_form"):
-        new_grok_key = st.text_input(
-            "Grok API Key", value=GROK_API_KEY, type="password",
-            help="Get your API key from https://console.x.ai",
+    with st.form("groq_form"):
+        new_groq_key = st.text_input(
+            "Groq API Key", value=GROQ_API_KEY, type="password",
+            help="Get your API key from https://console.groq.com",
         )
-        new_grok_model = st.text_input(
-            "Grok Model", value=GROK_MODEL,
-            help="e.g., grok-3, grok-3-mini",
+        new_groq_model = st.text_input(
+            "Groq Model", value=GROQ_MODEL,
+            help="e.g., llama-3.3-70b-versatile, llama-3.1-8b-instant",
         )
-        save_grok = st.form_submit_button("💾 Save Grok Settings", use_container_width=True)
-        if save_grok:
-            _update_env_var("GROK_API_KEY", new_grok_key)
-            _update_env_var("GROK_MODEL", new_grok_model)
+        save_groq = st.form_submit_button("💾 Save Groq Settings", use_container_width=True)
+        if save_groq:
+            _update_env_var("GROQ_API_KEY", new_groq_key)
+            _update_env_var("GROQ_MODEL", new_groq_model)
             _reset_providers()
-            st.success("✅ Grok settings saved. Restart to apply.")
+            st.success("✅ Groq settings saved. Restart to apply.")
 
-    if st.button("🔌 Test Grok Connection", key="test_grok"):
-        with st.spinner("Testing Grok API..."):
-            from rag.providers.grok_provider import GrokProvider
-            prov = GrokProvider(GROK_API_KEY, GROK_MODEL)
+    if st.button("🔌 Test Groq Connection", key="test_groq"):
+        with st.spinner("Testing Groq API..."):
+            from rag.providers.groq_provider import GroqProvider
+            prov = GroqProvider(GROQ_API_KEY, GROQ_MODEL)
             status = prov.get_status()
             if status["status"] == "ok":
                 st.success(f"✅ {status['message']}")

@@ -1,16 +1,16 @@
 """
-IMS AstroBot — xAI Grok LLM Provider
-Connects to the xAI Grok API (OpenAI-compatible chat completions).
+IMS AstroBot — Groq LLM Provider
+Connects to the Groq API (OpenAI-compatible chat completions).
 """
 
 import requests
 from rag.providers.base import LLMProvider
 
-_GROK_API_URL = "https://api.x.ai/v1/chat/completions"
+_GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 
-class GrokProvider(LLMProvider):
-    """LLM provider using xAI Grok API."""
+class GroqProvider(LLMProvider):
+    """LLM provider using Groq API."""
 
     def __init__(self, api_key: str, model: str):
         self._api_key = api_key
@@ -18,7 +18,7 @@ class GrokProvider(LLMProvider):
 
     @property
     def name(self) -> str:
-        return "Grok (xAI)"
+        return "Groq"
 
     def generate(self, system_prompt: str, user_message: str,
                  temperature: float, max_tokens: int) -> str:
@@ -35,7 +35,7 @@ class GrokProvider(LLMProvider):
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        resp = requests.post(_GROK_API_URL, json=payload, headers=headers, timeout=60)
+        resp = requests.post(_GROQ_API_URL, json=payload, headers=headers, timeout=60)
         resp.raise_for_status()
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
@@ -56,7 +56,7 @@ class GrokProvider(LLMProvider):
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1,
             }
-            resp = requests.post(_GROK_API_URL, json=payload, headers=headers, timeout=10)
+            resp = requests.post(_GROQ_API_URL, json=payload, headers=headers, timeout=10)
             if resp.status_code == 200:
                 return {"status": "ok", "message": f"Model '{self._model}' ready"}
             elif resp.status_code == 401:
@@ -64,7 +64,7 @@ class GrokProvider(LLMProvider):
             else:
                 return {"status": "error", "message": f"API error: {resp.status_code}"}
         except requests.ConnectionError:
-            return {"status": "error", "message": "Cannot connect to xAI API"}
+            return {"status": "error", "message": "Cannot connect to Groq API"}
         except Exception as e:
             return {"status": "error", "message": str(e)}
 
@@ -79,7 +79,7 @@ class GrokProvider(LLMProvider):
                 "messages": [{"role": "user", "content": "hi"}],
                 "max_tokens": 1,
             }
-            resp = requests.post(_GROK_API_URL, json=payload, headers=headers, timeout=10)
+            resp = requests.post(_GROQ_API_URL, json=payload, headers=headers, timeout=10)
             return resp.status_code == 200
         except Exception:
             return False

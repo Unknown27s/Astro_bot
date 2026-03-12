@@ -9,8 +9,15 @@ export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({ username: '', password: '', fullName: '', role: 'student' });
 
-  const load = () => listUsers().then(r => setUsers(r.data)).catch(() => {});
-  useEffect(load, []);
+  const load = () => {
+    listUsers()
+      .then(r => setUsers(r.data))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -26,15 +33,29 @@ export default function UsersPage() {
   };
 
   const handleToggle = async (u) => {
-    await toggleUser(u.id, !u.is_active);
-    load();
+    const newActive = u.is_active === 1 ? false : true;
+    try {
+      await toggleUser(u.id, newActive);
+      toast.success(`User ${newActive ? 'enabled' : 'disabled'}`);
+      load();
+    } catch (err) {
+      toast.error(
+        err.response?.data?.detail || 'Failed to update user status'
+      );
+    }
   };
 
   const handleDelete = async (u) => {
     if (!confirm(`Delete user "${u.username}"?`)) return;
-    await deleteUser(u.id);
-    toast.success('User deleted');
-    load();
+    try {
+      await deleteUser(u.id);
+      toast.success('User deleted');
+      load();
+    } catch (err) {
+      toast.error(
+        err.response?.data?.detail || 'Failed to delete user'
+      );
+    }
   };
 
   const roleBadge = { admin: '🔑 Admin', faculty: '🎓 Faculty', student: '📚 Student' };
@@ -82,14 +103,14 @@ export default function UsersPage() {
         ) : (
           users.map(u => (
             <div key={u.id} className="table-row">
-              <span style={{ fontSize: 16 }}>{u.is_active ? '🟢' : '🔴'}</span>
+              <span style={{ fontSize: 16 }}>{u.is_active === 1 ? '🟢' : '🔴'}</span>
               <div style={{ flex: 1 }}>
                 <span style={{ fontWeight: 500 }}>{u.username}</span>
                 <span className="text-sm text-muted"> ({u.full_name})</span>
               </div>
               <span className="text-sm">{roleBadge[u.role] || u.role}</span>
               <button className="btn btn-ghost btn-sm" onClick={() => handleToggle(u)}>
-                {u.is_active ? 'Disable' : 'Enable'}
+                {u.is_active === 1 ? 'Disable' : 'Enable'}
               </button>
               {u.username !== currentUser?.username && (
                 <button className="btn btn-danger btn-sm" onClick={() => handleDelete(u)}>

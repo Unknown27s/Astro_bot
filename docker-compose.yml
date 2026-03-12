@@ -1,0 +1,105 @@
+version: '3.9'
+services:
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: astrobot-chromadb
+    ports:
+      - "8001:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    environment:
+      IS_PERSISTENT: "true"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - astrobot-net
+
+  astrobot-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.api
+      cache_from:
+        - astrobot-api:latest
+    container_name: astrobot-api
+    ports:
+      - "8000:8000"
+    environment:
+      - LLM_PROVIDER=${LLM_PROVIDER:-groq}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - EMBEDDING_PROVIDER=sentence-transformers
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      chromadb:
+        condition: service_healthy
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - astrobot-net
+    restart: unless-stopped
+
+  astrobot-backend:
+    build:
+      context: ./springboot-backend
+      dockerfile: Dockerfile
+      cache_from:
+        - astrobot-backend:latest
+    container_name: astrobot-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_API_URL=http://astrobot-api:8000
+      - JAVA_OPTS=-Xmx512m
+    depends_on:
+      astrobot-api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - astrobot-net
+    restart: unless-stopped
+
+  astrobot-frontend:
+    build:
+      context: ./react-frontend
+      dockerfile: Dockerfile
+      cache_from:
+        - astrobot-frontend:latest
+    container_name: astrobot-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080
+      - API_URL=http://astrobot-backend:8080
+    depends_on:
+      astrobot-backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - astrobot-net
+    restart: unless-stopped
+
+volumes:
+  chroma_data:
+    driver: local
+
+networks:
+  astrobot-net:
+    driver: bridge

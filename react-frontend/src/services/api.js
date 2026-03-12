@@ -14,7 +14,7 @@ export const register = (username, password, role, fullName) =>
 
 // ── Chat ──
 export const sendChat = (query, userId, username) =>
-  api.post('/chat', { query, user_id: userId, username });
+  api.post('/chat', { query, userId, username });
 
 export const getChatStatus = () => api.get('/chat/status');
 

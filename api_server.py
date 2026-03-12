@@ -92,8 +92,8 @@ class ProviderSettingsRequest(BaseModel):
     fallback_provider: Optional[str] = None
     ollama_base_url: Optional[str] = None
     ollama_model: Optional[str] = None
-    grok_api_key: Optional[str] = None
-    grok_model: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    groq_model: Optional[str] = None
     gemini_api_key: Optional[str] = None
     gemini_model: Optional[str] = None
     temperature: Optional[float] = None
@@ -296,15 +296,21 @@ def api_create_user(req: CreateUserRequest):
 @app.patch("/api/users/{user_id}/toggle")
 def api_toggle_user(user_id: str, req: ToggleUserRequest):
     """Enable or disable a user account."""
-    toggle_user_active(user_id, req.is_active)
-    return {"message": "User updated"}
+    try:
+        toggle_user_active(user_id, req.is_active)
+        return {"message": "User updated"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update user: {str(e)}")
 
 
 @app.delete("/api/users/{user_id}")
 def api_delete_user(user_id: str):
     """Delete a user."""
-    delete_user(user_id)
-    return {"message": "User deleted"}
+    try:
+        delete_user(user_id)
+        return {"message": "User deleted"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete user: {str(e)}")
 
 
 # ═══════════════════════════════════════════════════════
@@ -329,58 +335,80 @@ def api_query_logs(limit: int = 50):
 
 @app.get("/api/health")
 def api_health():
-    """Get system health status for all components."""
-    health = {}
+    """Get system health status for core (fast) components only.
 
-    # SQLite
+    LLM provider checks are exposed separately via /api/health/providers.
+    """
+    components = {}
+
+    # SQLite (fast local check)
     try:
         conn = get_connection()
         conn.execute("SELECT 1")
         u = conn.execute("SELECT COUNT(*) as cnt FROM users").fetchone()["cnt"]
         d = conn.execute("SELECT COUNT(*) as cnt FROM documents").fetchone()["cnt"]
         conn.close()
-        health["sqlite"] = {"status": "ok", "message": f"{u} users, {d} documents"}
+        components["sqlite"] = {
+            "status": "ok",
+            "message": f"{u} users, {d} documents",
+        }
     except Exception as e:
-        health["sqlite"] = {"status": "error", "message": str(e)}
+        components["sqlite"] = {"status": "error", "message": str(e)}
 
     # ChromaDB
     chroma_path = Path(CHROMA_PERSIST_DIR)
-    health["chromadb"] = (
+    components["chromadb"] = (
         {"status": "ok", "message": f"Ready at {chroma_path.name}/"}
         if chroma_path.exists()
         else {"status": "warning", "message": "Will create on first use"}
     )
 
-    # LLM providers
-    from rag.providers.manager import get_manager
-    mgr = get_manager()
-    provider_statuses = mgr.get_all_statuses()
-    meta = provider_statuses.pop("_mode", {})
-    health["llm_mode"] = {"status": "ok", "message": meta.get("mode", "local_only")}
-    for key in ("ollama", "grok", "gemini"):
-        if key in provider_statuses:
-            health[f"llm_{key}"] = provider_statuses[key]
-
-    # Embeddings
+    # Embeddings package presence (no model load here)
     try:
         import sentence_transformers
-        health["embeddings"] = {"status": "ok", "message": f"{EMBEDDING_MODEL} (lazy load)"}
+        components["embeddings"] = {
+            "status": "ok",
+            "message": f"{EMBEDDING_MODEL} (lazy load)",
+        }
     except ImportError:
-        health["embeddings"] = {"status": "error", "message": "Package missing"}
+        components["embeddings"] = {
+            "status": "error",
+            "message": "Package missing",
+        }
 
     # Uploads
     if UPLOAD_DIR.exists():
         fc = len([f for f in UPLOAD_DIR.iterdir() if f.is_file()])
-        health["uploads"] = {"status": "ok", "message": f"{fc} files"}
+        components["uploads"] = {
+            "status": "ok",
+            "message": f"{fc} files",
+        }
     else:
-        health["uploads"] = {"status": "error", "message": "Directory missing"}
+        components["uploads"] = {
+            "status": "error",
+            "message": "Directory missing",
+        }
 
-    return health
+    # Overall status aggregation
+    overall_status = "healthy"
+    for comp in components.values():
+        status = comp.get("status", "error")
+        if status == "error":
+            overall_status = "unhealthy"
+            break
+        if status in ("warning", "degraded") and overall_status == "healthy":
+            overall_status = "degraded"
+
+    return {
+        "status": overall_status,
+        "components": components,
+        "providers": {},  # populated by /api/health/providers on demand
+    }
 
 
 @app.get("/api/health/providers")
 def api_provider_statuses():
-    """Get detailed provider statuses."""
+    """Get detailed provider statuses (may call external LLM APIs)."""
     from rag.providers.manager import get_manager
     mgr = get_manager()
     return mgr.get_all_statuses()
@@ -400,14 +428,14 @@ def api_get_settings():
         "fallback_provider": config.LLM_FALLBACK_PROVIDER,
         "ollama_base_url": config.OLLAMA_BASE_URL,
         "ollama_model": config.OLLAMA_MODEL,
-        "grok_model": config.GROK_MODEL,
+        "groq_model": config.GROQ_MODEL,
         "gemini_model": config.GEMINI_MODEL,
         "temperature": config.MODEL_TEMPERATURE,
         "max_tokens": config.MODEL_MAX_TOKENS,
         "embedding_model": config.EMBEDDING_MODEL,
         "system_prompt": config.SYSTEM_PROMPT,
         # Never expose API keys — only show if set
-        "grok_api_key_set": bool(os.getenv("GROK_API_KEY", "")),
+        "groq_api_key_set": bool(os.getenv("GROQ_API_KEY", "")),
         "gemini_api_key_set": bool(os.getenv("GEMINI_API_KEY", "")),
     }
 
@@ -423,8 +451,8 @@ def api_update_settings(req: ProviderSettingsRequest):
         "fallback_provider": "LLM_FALLBACK_PROVIDER",
         "ollama_base_url": "OLLAMA_BASE_URL",
         "ollama_model": "OLLAMA_MODEL",
-        "grok_api_key": "GROK_API_KEY",
-        "grok_model": "GROK_MODEL",
+        "groq_api_key": "GROQ_API_KEY",
+        "groq_model": "GROQ_MODEL",
         "gemini_api_key": "GEMINI_API_KEY",
         "gemini_model": "GEMINI_MODEL",
         "temperature": "MODEL_TEMPERATURE",
@@ -459,11 +487,11 @@ def api_test_provider(provider: str):
         if status["status"] in ("ok", "warning"):
             extra["models"] = prov.list_models()
         return {**status, **extra}
-    elif provider == "grok":
-        from rag.providers.grok_provider import GrokProvider
-        prov = GrokProvider(
-            os.environ.get("GROK_API_KEY", ""),
-            os.environ.get("GROK_MODEL", "grok-3"),
+    elif provider == "groq":
+        from rag.providers.groq_provider import GroqProvider
+        prov = GroqProvider(
+            os.environ.get("GROQ_API_KEY", ""),
+            os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"),
         )
         return prov.get_status()
     elif provider == "gemini":
