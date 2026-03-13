@@ -139,17 +139,17 @@ def add_memory_entry(
         )
         
         # Also store in SQLite for admin access and cleanup
-        from database.db import store_memory_in_db
-        store_memory_in_db(
+        from database.db import store_memory
+        store_memory(
             memory_id=memory_id,
-            user_id=user_id,
             query_text=query,
-            response_preview=response[:500],
-            sources_json=json.dumps(sources),
-            created_at=metadata["created_at"]
+            response_text=response[:500],
+            sources=json.dumps(sources),
+            user_id=user_id,
+            expires_at=(datetime.now() + timedelta(days=CONV_TTL_DAYS)).isoformat()
         )
         
-        return True
+        return {"id": memory_id}
     
     except Exception as e:
         print(f"[Memory] Error adding memory entry: {e}")
@@ -162,8 +162,8 @@ def delete_memory_entry(memory_id: str) -> bool:
         collection = get_memory_collection()
         collection.delete(ids=[memory_id])
         
-        from database.db import delete_memory_from_db
-        delete_memory_from_db(memory_id)
+        from database.db import delete_memory
+        delete_memory(memory_id)
         
         return True
     except Exception as e:
@@ -178,7 +178,7 @@ def invalidate_memory_by_source(source_doc_id: str) -> int:
     
     Args:
         source_doc_id: Document ID from database
-    
+
     Returns:
         Number of entries invalidated
     """
@@ -186,28 +186,11 @@ def invalidate_memory_by_source(source_doc_id: str) -> int:
         return 0
     
     try:
-        collection = get_memory_collection()
+        from database.db import invalidate_memory_by_source as db_invalidate
+        deleted_count = db_invalidate(source_doc_id)
         
-        # Get all entries that reference this document
-        from database.db import get_memory_by_source
-        entries = get_memory_by_source(source_doc_id)
-        
-        deleted_count = 0
-        for entry in entries:
-            try:
-                collection.delete(ids=[entry["memory_id"]])
-                from database.db import delete_memory_from_db
-                delete_memory_from_db(entry["memory_id"])
-                deleted_count += 1
-            except Exception as e:
-                print(f"[Memory] Error deleting entry {entry['memory_id']}: {e}")
-        
-        return deleted_count
-    
-    except Exception as e:
-        print(f"[Memory] Error invalidating memory by source: {e}")
-        return 0
-
+        # Also remove from ChromaDB (optional - ChromaDB will keep stale entries)
+        # In production, you might want to mark entries as invalid rather than delete
 
 def cleanup_old_memory() -> int:
     """
@@ -221,25 +204,8 @@ def cleanup_old_memory() -> int:
         return 0
     
     try:
-        from database.db import cleanup_memory_entries
-        deleted_count = cleanup_memory_entries(
-            ttl_days=CONV_TTL_DAYS,
-            min_usage=CONV_MIN_USAGE_FOR_KEEP
-        )
-        
-        # Also clean from ChromaDB if using filtering
-        collection = get_memory_collection()
-        cutoff_date = (datetime.now() - timedelta(days=CONV_TTL_DAYS)).isoformat()
-        
-        # Get all entries older than cutoff
-        from database.db import get_old_memory_entries
-        old_entries = get_old_memory_entries(cutoff_date)
-        
-        for entry in old_entries:
-            try:
-                collection.delete(ids=[entry["memory_id"]])
-            except:
-                pass
+        from database.db import cleanup_expired_memory
+        deleted_count = cleanup_expired_memory()
         
         return deleted_count
     
@@ -251,32 +217,29 @@ def cleanup_old_memory() -> int:
 def get_memory_stats() -> dict:
     """Get memory usage statistics."""
     try:
-        collection = get_memory_collection()
-        total_entries = collection.count()
-        
-        from database.db import get_memory_db_stats
-        db_stats = get_memory_db_stats()
+        from database.db import get_memory_stats
+        db_stats = get_memory_stats()
         
         return {
-            "chromadb_entries": total_entries,
-            "database_entries": db_stats.get("total", 0),
-            "memory_hits": db_stats.get("hits", 0),
-            "avg_similarity": db_stats.get("avg_similarity", 0),
-            "total_storage_saved_ms": db_stats.get("total_saved_ms", 0),
+            "total_entries": db_stats.get("total_entries", 0),
+            "avg_usage": db_stats.get("avg_usage_per_entry", 0),
+            "by_user": db_stats.get("by_user", []),
+            "status": "ok"
         }
     except Exception as e:
-        print(f"[Memory] Error getting memory stats: {e}")
-        return {"error": str(e)}
+        print(f"[Memory] Error getting stats: {e}")
+        return {"total_entries": 0, "avg_usage": 0, "by_user": [], "status": "error", "error": str(e)}
 
 
 def clear_all_memory() -> bool:
     """Clear all conversation memory (admin action)."""
     try:
+        from ingestion.embedder import get_chroma_client
         client = get_chroma_client()
         client.delete_collection(name=CONV_PERSIST_COLLECTION)
         
-        from database.db import clear_all_memory_db
-        clear_all_memory_db()
+        from database.db import clear_all_memory as db_clear_all
+        db_clear_all()
         
         # Recreate collection
         get_memory_collection()

@@ -203,4 +203,41 @@ public class PythonApiService {
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
                 .block();
     }
+
+    // ── Memory ──
+
+    public Map<String, Object> getMemoryStats() {
+        return client.get()
+                .uri("/api/memory/stats")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    public Map<String, Object> deleteMemoryEntry(String memoryId) {
+        return client.delete()
+                .uri("/api/memory/{memoryId}", memoryId)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    public Map<String, Object> runMemoryCleanup() {
+        return client.post()
+                .uri("/api/memory/cleanup")
+                .bodyValue(Map.of())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
+
+    public Map<String, Object> clearAllMemory() {
+        return client.post()
+                .uri("/api/memory/clear")
+                .bodyValue(Map.of())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .block();
+    }
 }
+

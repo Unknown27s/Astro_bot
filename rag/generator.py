@@ -55,7 +55,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
                 return {
                     "response": memory_result["response"],
                     "from_memory": True,
-                    "memory_id": memory_result.get("id")
+                    "memory_id": memory_result.get("memory_id")
                 }
         except Exception as e:
             # Memory check failed, continue with LLM generation
@@ -93,7 +93,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
             return {
                 "response": result,
                 "from_memory": False,
-                "memory_id": memory_entry.get("id") if memory_entry else None
+                "memory_id": memory_entry.get("id") if isinstance(memory_entry, dict) else None
             }
         except Exception as e:
             # Memory storage failed, but still return the response
