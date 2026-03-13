@@ -315,16 +315,12 @@ def update_memory_usage(memory_id: str, similarity: float = None):
     """Increment usage count and update last_accessed timestamp."""
     conn = get_connection()
     try:
-        if similarity is not None:
-            conn.execute(
-                "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ?, similarity_score = ? WHERE id = ?",
-                (datetime.now().isoformat(), round(similarity, 3), memory_id),
-            )
-        else:
-            conn.execute(
-                "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
-                (datetime.now().isoformat(), memory_id),
-            )
+        # Just update usage count and last accessed time
+        # (similarity parameter kept for compatibility but not stored)
+        conn.execute(
+            "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
+            (datetime.now().isoformat(), memory_id),
+        )
         conn.commit()
     finally:
         conn.close()
