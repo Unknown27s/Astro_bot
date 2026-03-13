@@ -311,14 +311,20 @@ def store_memory(memory_id: str, query_text: str, response_text: str, sources: s
         conn.close()
 
 
-def update_memory_usage(memory_id: str):
+def update_memory_usage(memory_id: str, similarity: float = None):
     """Increment usage count and update last_accessed timestamp."""
     conn = get_connection()
     try:
-        conn.execute(
-            "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
-            (datetime.now().isoformat(), memory_id),
-        )
+        if similarity is not None:
+            conn.execute(
+                "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ?, similarity_score = ? WHERE id = ?",
+                (datetime.now().isoformat(), round(similarity, 3), memory_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
+                (datetime.now().isoformat(), memory_id),
+            )
         conn.commit()
     finally:
         conn.close()
@@ -391,18 +397,26 @@ def get_memory_stats() -> dict:
     conn = get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) as cnt FROM conversation_memory").fetchone()["cnt"]
+        
+        # Query with LEFT JOIN to get actual usernames from users table
         by_user_raw = conn.execute("""
-            SELECT user_id, COUNT(*) as cnt, SUM(usage_count) as total_usage, AVG(usage_count) as avg_usage
-            FROM conversation_memory 
-            GROUP BY user_id
+            SELECT 
+                COALESCE(u.username, 'Global') as username,
+                COUNT(*) as cnt, 
+                AVG(cm.usage_count) as avg_usage
+            FROM conversation_memory cm
+            LEFT JOIN users u ON cm.user_id = u.id
+            GROUP BY cm.user_id
+            ORDER BY cnt DESC
         """).fetchall()
+        
         avg_usage = conn.execute("SELECT AVG(usage_count) as avg FROM conversation_memory").fetchone()["avg"]
         
         # Transform by_user data to match React expectations
         by_user = []
         for row in by_user_raw:
             by_user.append({
-                "username": row["user_id"] if row["user_id"] and row["user_id"] != "global" else "Global",
+                "username": row["username"],
                 "entries": row["cnt"],
                 "avg_usage": round(row["avg_usage"], 2) if row["avg_usage"] else 0
             })
