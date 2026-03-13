@@ -43,16 +43,24 @@ def query_memory(query: str, user_id: Optional[str] = None) -> Optional[dict]:
     try:
         collection = get_memory_collection()
         
+        # Debug: Check collection size
+        total_count = collection.count()
+        print(f"[Memory] Collection size: {total_count} entries")
+        
         # Embed query
         query_embedding = generate_embeddings([query])[0]
+        print(f"[Memory] Querying for: '{query[:60]}...'")
         
         # Search with filter if per-user memory enabled
         where_filter = None
         if CONV_PER_USER and user_id:
             where_filter = {"user_id": user_id}
+            print(f"[Memory] Using per-user filter: {user_id}")
         elif CONV_PER_USER:
-            # If per-user but no user_id provided, don't match anything from other users
             where_filter = {"user_id": {"$exists": False}}
+            print(f"[Memory] Using global-only filter")
+        else:
+            print(f"[Memory] No filter (global memory mode)")
         
         results = collection.query(
             query_embeddings=[query_embedding],
@@ -60,15 +68,21 @@ def query_memory(query: str, user_id: Optional[str] = None) -> Optional[dict]:
             where=where_filter,
         )
         
+        print(f"[Memory] Query results: {len(results.get('ids', [[]])[0])} matches found")
+        
         if results and results["ids"] and len(results["ids"]) > 0:
             # Get similarity score (distance converted to similarity)
             distance = results["distances"][0][0] if results["distances"] else 2.0
             similarity = 1 - (distance / 2)
             
+            print(f"[Memory] Match found! Distance: {distance:.4f}, Similarity: {similarity:.4f}, Threshold: {CONV_MATCH_THRESHOLD}")
+            
             if similarity >= CONV_MATCH_THRESHOLD:
                 # Good match found
                 metadata = results["metadatas"][0][0] if results["metadatas"] else {}
                 memory_id = results["ids"][0][0]
+                
+                print(f"[Memory] ✅ CACHE HIT! Returning cached response (ID: {memory_id})")
                 
                 # Update usage in database
                 from database.db import update_memory_usage
@@ -82,11 +96,17 @@ def query_memory(query: str, user_id: Optional[str] = None) -> Optional[dict]:
                     "created_at": metadata.get("created_at"),
                     "usage_count": metadata.get("usage_count", 1)
                 }
+            else:
+                print(f"[Memory] ❌ Similarity too low ({similarity:.4f} < {CONV_MATCH_THRESHOLD})")
+        else:
+            print(f"[Memory] ❌ No matches found in collection")
         
         return None
     
     except Exception as e:
         print(f"[Memory] Error querying memory: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -95,7 +115,7 @@ def add_memory_entry(
     response: str,
     sources: list,
     user_id: Optional[str] = None
-) -> bool:
+) -> dict:
     """
     Store a new Q&A pair in memory.
     
@@ -106,9 +126,10 @@ def add_memory_entry(
         user_id: Optional user ID for per-user memory
     
     Returns:
-        True if stored successfully
+        Dict with memory ID or False if failed
     """
     if not CONV_ENABLED:
+        print("[Memory] Memory disabled, skipping storage")
         return False
     
     try:
@@ -117,6 +138,8 @@ def add_memory_entry(
         
         # Embed query
         query_embedding = generate_embeddings([query])[0]
+        
+        print(f"[Memory] 💾 Storing query: '{query[:60]}...' (user_id: {user_id or 'global'})")
         
         # Prepare metadata
         metadata = {
@@ -138,6 +161,8 @@ def add_memory_entry(
             metadatas=[metadata],
         )
         
+        print(f"[Memory] ✅ Stored in ChromaDB (ID: {memory_id})")
+        
         # Also store in SQLite for admin access and cleanup
         from database.db import store_memory
         store_memory(
@@ -149,10 +174,14 @@ def add_memory_entry(
             expires_at=(datetime.now() + timedelta(days=CONV_TTL_DAYS)).isoformat()
         )
         
+        print(f"[Memory] ✅ Stored in SQLite")
+        
         return {"id": memory_id}
     
     except Exception as e:
-        print(f"[Memory] Error adding memory entry: {e}")
+        print(f"[Memory] ❌ Error adding memory entry: {e}")
+        import traceback
+        traceback.print_exc()
         return False
 
 
@@ -175,7 +204,7 @@ def invalidate_memory_by_source(source_doc_id: str) -> int:
     """
     Invalidate (delete) all memory entries that reference a specific document.
     Called when a document is re-uploaded/reprocessed.
-    
+
     Args:
         source_doc_id: Document ID from database
 
@@ -188,9 +217,12 @@ def invalidate_memory_by_source(source_doc_id: str) -> int:
     try:
         from database.db import invalidate_memory_by_source as db_invalidate
         deleted_count = db_invalidate(source_doc_id)
-        
-        # Also remove from ChromaDB (optional - ChromaDB will keep stale entries)
-        # In production, you might want to mark entries as invalid rather than delete
+        return deleted_count
+    
+    except Exception as e:
+        print(f"[Memory] Error invalidating memory by source: {e}")
+        return 0
+
 
 def cleanup_old_memory() -> int:
     """
