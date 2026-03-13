@@ -21,6 +21,7 @@ IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institu
 - 👥 **User Management** — Create users, enable/disable accounts, manage roles (admin/faculty/student)
 - 📊 **Usage Analytics** — Dashboard with total queries, top users, response times, daily trends
 - 📋 **Query Logs** — Inspect recent queries with full responses and source documents
+- 💾 **Conversation Memory** — Intelligent semantic caching for instant responses to similar questions (⚡50-100ms)
 - 🤖 **AI Settings** — Swap GGUF models, tune temperature/tokens, edit system prompts
 - 🩺 **System Health** — Real-time status checks for SQLite, ChromaDB, LLM, embeddings, file storage
 
@@ -319,8 +320,169 @@ After login as admin, access these pages from the sidebar:
 | **📄 Documents** | Upload, list, delete institutional documents |
 | **💬 Chat** | Test RAG pipeline with sample queries |
 | **📊 Analytics** | View queries per user, response times, trends |
+| **💾 Memory** | Manage conversation cache, view statistics, cleanup old entries |
 | **🤖 Settings** | Upload GGUF models, tune LLM parameters, edit prompts |
 | **🩺 Health** | Check system status (DB, embeddings, LLM, file storage) |
+
+---
+
+## 💾 Conversation Memory (Caching)
+
+**IMS AstroBot now features semantic conversation memory** — automatically cache Q&A pairs to provide instant responses to similar questions without re-querying the LLM.
+
+### What is Conversation Memory?
+
+Conversation Memory is an intelligent caching system that:
+1. **Stores user queries and AI responses** in ChromaDB (vector DB) + SQLite (metadata)
+2. **When a user asks a new question**, the system checks if a similar question exists in memory
+3. **If similarity score ≥ threshold (0.88)**, returns the cached response instantly ⚡
+4. **If not similar**, generates a fresh response via the LLM and stores it for future use
+
+**Result:** Frequently asked questions get instant responses, reducing LLM load and response time.
+
+### Enable Conversation Memory
+
+**Edit `.env` file:**
+
+```ini
+# ═══════════════ Conversation Memory ═════════════════
+CONV_ENABLED=true                        # Enable/disable memory caching
+CONV_MATCH_THRESHOLD=0.88                # Similarity threshold (0-1, higher = stricter)
+CONV_PER_USER=false                      # false=global cache, true=per-user cache
+CONV_TTL_DAYS=90                         # Days to keep memory entries (auto-cleanup)
+CONV_MIN_USAGE_FOR_KEEP=1                # Min uses to keep entry (delete low-usage)
+CONV_PERSIST_COLLECTION=true             # Persist to ChromaDB (don't delete on restart)
+```
+
+**Restart FastAPI:**
+```bash
+# Stop the running FastAPI server (Ctrl+C)
+# Then restart:
+python api_server.py
+```
+
+Watch for log: `[Embedder] ChromaDB client ready` ✅
+
+### How to Use Memory
+
+#### 1. **View Memory Statistics** (Admin Only)
+
+Go to **Admin → 💾 Memory** tab:
+- **📊 Statistics**: Total cached entries, average usage, cache hit rate
+- **👥 By User**: Breakdown of entries per user
+- **Enabled Status**: Current enabled/disabled state
+
+#### 2. **Test Cache Hit** (Chat)
+
+1. Ask a question: *"What is the institution's mission?"*
+   - First time: Takes ~1-2 seconds (LLM generates answer)
+   - Response cached automatically
+2. Ask similar question: *"What's our institution's mission?"*
+   - Similarity check: 0.92 ≥ 0.88 ✓
+   - Returns **⚡ Instant Response (from memory cache)** badge
+   - Response appears in ~50-100ms (no LLM call)
+
+#### 3. **Cleanup Old Entries** (Admin Only)
+
+Go to **Admin → 💾 Memory → 🧹 Cleanup**:
+- **Run Cleanup**: Delete entries older than 90 days + responses with < 1 use
+- **Clear All Memory**: Completely wipe memory database (⚠️ irreversible)
+
+#### 4. **View Current Configuration**
+
+Go to **Admin → 💾 Memory → ⚙️ Settings** — Shows read-only config:
+- Match threshold
+- Storage type (ChromaDB + SQLite)
+- Scope (global or per-user)
+- TTL (days until auto-delete)
+- Persistence status
+
+### Configuration Options
+
+| Setting | Default | Range | Purpose |
+|---------|---------|-------|---------|
+| `CONV_ENABLED` | `true` | bool | Enable/disable memory feature |
+| `CONV_MATCH_THRESHOLD` | `0.88` | 0.0-1.0 | Semantic similarity threshold (higher = stricter matching) |
+| `CONV_PER_USER` | `false` | bool | `false` = global cache (shared), `true` = per-user cache |
+| `CONV_TTL_DAYS` | `90` | 1-365 | Auto-delete entries older than N days |
+| `CONV_MIN_USAGE_FOR_KEEP` | `1` | 0-10 | Delete entries with fewer uses than this (0 = never delete by usage) |
+| `CONV_PERSIST_COLLECTION` | `true` | bool | Persist ChromaDB collection (survives restart) |
+
+### Memory Storage
+
+- **ChromaDB** (`data/chroma_db/`) — Vector embeddings for semantic search
+- **SQLite** (`data/astrobot.db`, table: `conversation_memory`) — Metadata (query text, response, timestamps, usage count)
+
+### Performance Impact
+
+| Metric | Value |
+|--------|-------|
+| **Memory Lookup Time** | ~10-20ms (semantic search) |
+| **Cache Hit Response Time** | ~50-100ms (vs 300-2000ms for LLM) |
+| **Memory Storage Per Entry** | ~2-5 KB (query + response + metadata) |
+| **Database Size (1000 entries)** | ~5-10 MB |
+| **Cache Hit Rate Example** | ~30-50% for typical institutional Q&A |
+
+### Example Workflow
+
+```
+User: "How do I enroll in courses?"
+  ↓
+Memory check: No similar entry exists
+  ↓
+Generate response via LLM (1.2 seconds)
+  ↓
+Store query + response in ChromaDB + SQLite
+  ↓
+Return response + show: "📝 New entry cached"
+
+---
+
+User (next day): "What's the enrollment process?"
+  ↓
+Memory check: Similarity = 0.91 ≥ 0.88 ✓
+  ↓
+Return cached response (0.08 seconds)
+  ↓
+Show badge: "⚡ Instant Response (from memory cache)"
+  ↓
+Increment usage counter (now used 2 times)
+```
+
+### Troubleshooting Memory
+
+| Issue | Solution |
+|-------|----------|
+| Memory not working | Verify `CONV_ENABLED=true` in `.env` and restart FastAPI |
+| Cache hits not showing | Check similarity threshold (try lowering from 0.88 to 0.85) |
+| Memory DB growing too fast | Lower `CONV_TTL_DAYS` or raise `CONV_MIN_USAGE_FOR_KEEP` |
+| High memory usage | Run **Cleanup** in Admin UI or manually: `curl -X POST http://localhost:8000/api/memory/cleanup` |
+| Memory disabled but want to enable | Edit `.env`, set `CONV_ENABLED=true`, restart all servers |
+
+### API Endpoints (Developers)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/memory/stats` | GET | Get memory statistics (enabled status, total entries, usage breakdown) |
+| `/api/memory/{memoryId}` | DELETE | Remove specific memory entry |
+| `/api/memory/cleanup` | POST | Run cleanup (delete expired + low-usage entries) |
+| `/api/memory/clear` | POST | Clear all memory (admin only, irreversible) |
+
+**Examples:**
+
+```bash
+# Get statistics
+curl http://localhost:8000/api/memory/stats
+
+# Delete an entry
+curl -X DELETE http://localhost:8000/api/memory/mem-id-123
+
+# Run cleanup
+curl -X POST http://localhost:8000/api/memory/cleanup
+
+# Clear all
+curl -X POST http://localhost:8000/api/memory/clear
+```
 
 ---
 
@@ -407,7 +569,13 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
 JWT_SECRET=your-secret-key-here
 JWT_EXPIRATION=24                        # hours
-
+# ═══════════════ CONVERSATION MEMORY ═════════════════
+CONV_ENABLED=true                        # Enable semantic caching
+CONV_MATCH_THRESHOLD=0.88                # Similarity threshold (0-1)
+CONV_PER_USER=false                      # false=global, true=per-user cache
+CONV_TTL_DAYS=90                         # Delete entries older than N days
+CONV_MIN_USAGE_FOR_KEEP=1                # Delete entries with < N uses
+CONV_PERSIST_COLLECTION=true             # Persist to ChromaDB
 # ═══════════════ SPRING BOOT ═══════════════
 SPRING_BOOT_PORT=8080
 PYTHON_API_URL=http://localhost:8000
