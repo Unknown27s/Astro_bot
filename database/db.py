@@ -391,17 +391,26 @@ def get_memory_stats() -> dict:
     conn = get_connection()
     try:
         total = conn.execute("SELECT COUNT(*) as cnt FROM conversation_memory").fetchone()["cnt"]
-        by_user = conn.execute("""
-            SELECT user_id, COUNT(*) as cnt, SUM(usage_count) as total_usage 
+        by_user_raw = conn.execute("""
+            SELECT user_id, COUNT(*) as cnt, SUM(usage_count) as total_usage, AVG(usage_count) as avg_usage
             FROM conversation_memory 
             GROUP BY user_id
         """).fetchall()
         avg_usage = conn.execute("SELECT AVG(usage_count) as avg FROM conversation_memory").fetchone()["avg"]
         
+        # Transform by_user data to match React expectations
+        by_user = []
+        for row in by_user_raw:
+            by_user.append({
+                "username": row["user_id"] if row["user_id"] and row["user_id"] != "global" else "Global",
+                "entries": row["cnt"],
+                "avg_usage": round(row["avg_usage"], 2) if row["avg_usage"] else 0
+            })
+        
         return {
             "total_entries": total,
             "avg_usage_per_entry": round(avg_usage, 2) if avg_usage else 0,
-            "by_user": [dict(row) for row in by_user],
+            "by_user": by_user,
         }
     finally:
         conn.close()
