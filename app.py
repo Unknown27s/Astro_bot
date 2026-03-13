@@ -304,7 +304,7 @@ def run_admin_dashboard():
 
         page = st.radio(
             "Navigate",
-            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "� Memory", "�💬 Test Chat"],
+            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "💾 Memory", "💬 Test Chat"],
             label_visibility="collapsed",
         )
 

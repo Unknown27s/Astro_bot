@@ -64,4 +64,14 @@ export const updateSettings = (settings) => api.put('/settings', settings);
 export const testProvider = (provider) =>
   api.post(`/settings/test-provider/${provider}`);
 
+// ── Memory ──
+export const getMemoryStats = () => api.get('/memory/stats');
+
+export const deleteMemoryEntry = (memoryId) =>
+  api.delete(`/memory/${memoryId}`);
+
+export const runMemoryCleanup = () => api.post('/memory/cleanup');
+
+export const clearAllMemory = () => api.post('/memory/clear');
+
 export default api;

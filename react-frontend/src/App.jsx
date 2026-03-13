@@ -9,6 +9,7 @@ import AnalyticsPage from './pages/admin/AnalyticsPage';
 import UsersPage from './pages/admin/UsersPage';
 import SettingsPage from './pages/admin/SettingsPage';
 import HealthPage from './pages/admin/HealthPage';
+import MemoryPage from './pages/admin/MemoryPage';
 
 function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route path="memory" element={<MemoryPage />} />
           <Route path="health" element={<HealthPage />} />
           <Route path="chat" element={<ChatPage />} />
         </Route>
