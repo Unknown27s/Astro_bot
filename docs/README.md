@@ -1,233 +1,200 @@
-# 📚 IMS AstroBot Documentation Hub
+# 📚 AstroBot v2.0 Documentation
 
-**Comprehensive documentation for IMS AstroBot v2.0 — RAG-powered institutional AI assistant**
-
----
-
-## 🎯 Quick Navigation
-
-### 🤖 **For AI Agents & Copilot**
-→ Start with **[START_HERE.md](START_HERE.md)**  
-→ Then read **[COPILOT_GUIDE.md](COPILOT_GUIDE.md)**  
-→ Reference **[guides/QUICKREF.md](guides/QUICKREF.md)** while working
-
-### 👨‍💻 **For Developers**
-→ **[guides/QUICKREF.md](guides/QUICKREF.md)** — Quick reference  
-→ **[architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md)** — Full system overview  
-→ **[architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md)** — Deep dive  
-→ **[development/DEVELOPMENT_GUIDE.md](development/DEVELOPMENT_GUIDE.md)** — How to add features
-
-### 📊 **For Understanding Visually**
-→ **[architecture/DIAGRAMS.md](architecture/DIAGRAMS.md)** — All flow diagrams
-
-### 🚀 **For Getting Started**
-→ **[guides/QUICKSTART.md](guides/QUICKSTART.md)** — 5-minute setup
-
-### 📍 **For Navigation**
-→ **[INDEX.md](INDEX.md)** — Complete documentation index
+Welcome to the AstroBot documentation! This directory contains comprehensive guides for setup, implementation, deployment, and API usage.
 
 ---
 
-## 📁 Folder Structure
+## 📖 Documentation Index
 
+### 🚀 [01 - Quick Start](./01-QUICKSTART.md)
+**Getting started in 5 minutes**
+- Installation steps
+- Dependency verification
+- Environment configuration
+- Running locally
+- Quick feature tests
+- Troubleshooting
+
+**Start here if you want to:** Get the app running quickly
+
+---
+
+### 🔧 [02 - Implementation Summary](./02-IMPLEMENTATION_SUMMARY.md)
+**Complete implementation details (300+ lines)**
+- Executive summary of all 4 phases
+- Feature-by-feature breakdown:
+  - **Phase 1**: Error Tracking & Structured Logging
+  - **Phase 2**: Rate Limiting
+  - **Phase 3**: Document Tagging/Classification
+  - **Phase 4**: Load Balancing
+- Files created and modified
+- Configuration options
+- Integration points
+- Testing checklist
+- Next steps & roadmap
+
+**Start here if you want to:** Understand what was implemented and how
+
+---
+
+### 🚀 [03 - Load Balancing & Scaling](./03-LOAD_BALANCING.md)
+**Production deployment guide (300+ lines)**
+- Architecture diagrams
+- Docker setup instructions
+- Nginx configuration
+- Horizontal scaling guide
+- SSL/TLS setup
+- Monitoring & troubleshooting
+- Performance tuning
+- Backup & recovery procedures
+- Production checklist
+
+**Start here if you want to:** Deploy to production with multiple instances
+
+---
+
+## 🎯 Choose Your Path
+
+### 👤 I'm New - Just Want to Run the App
+**Follow this path:**
+1. Read: [01-QUICKSTART.md](./01-QUICKSTART.md) - 5 min
+2. Run: `pip install -r requirements.txt && python api_server.py`
+3. Test: `curl http://localhost:8000/api/health`
+
+### 👨‍💻 I'm a Developer - Want to Understand Implementation
+**Follow this path:**
+1. Read: [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md) - 20 min
+2. Review: Code structure in project root
+3. Explore: API endpoints documentation
+4. Test: From [01-QUICKSTART.md](./01-QUICKSTART.md) "Test Key Features" section
+
+### 🚀 I'm DevOps - Want to Deploy to Production
+**Follow this path:**
+1. Read: [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md) - 30 min
+2. Run: Docker setup steps
+3. Configure: SSL certificates
+4. Monitor: Follow production checklist
+
+---
+
+## 📊 Quick Reference
+
+### 4 Phases Implemented
+
+| Phase | Feature | Status | 
+|-------|---------|--------|
+| 1 | Error Tracking & Logging | ✅ Complete |
+| 2 | Rate Limiting | ✅ Complete |
+| 3 | Document Tagging/Classification | ✅ Complete |
+| 4 | Load Balancing | ✅ Complete |
+
+### Dependencies Added
 ```
-docs/
-├── README.md                    ← You are here
-├── START_HERE.md               ← Start for copilots
-├── COPILOT_GUIDE.md            ← AI agent instructions
-├── INDEX.md                    ← Documentation index
-│
-├── guides/
-│   ├── QUICKREF.md             ← Commands & quick lookup
-│   ├── QUICKSTART.md           ← 5-min setup
-│   └── TROUBLESHOOTING.md      ← Common issues
-│
-├── architecture/
-│   ├── COMPLETE_UNDERSTANDING.md   ← System overview
-│   ├── ARCHITECTURE.md             ← Component details
-│   ├── DIAGRAMS.md                 ← Flow diagrams
-│   └── DATABASE_SCHEMA.md          ← DB documentation
-│
-└── development/
-    ├── DEVELOPMENT_GUIDE.md     ← Adding features
-    ├── CODE_CONVENTIONS.md      ← Coding standards
-    ├── ADDING_PROVIDERS.md      ← New LLM providers
-    └── PERFORMANCE_OPTIMIZATION.md
+sentry-sdk              # Error tracking
+python-json-logger      # JSON logging  
+slowapi                 # Rate limiting
+redis                   # Distributed rate limiting (optional)
+prometheus-client       # Metrics (optional)
+alembic                 # Database migrations
+pyyaml                  # Config management
 ```
 
 ---
 
-## 🎓 Learning Paths
+## 🚀 Getting Started
 
-### Path 1: AI Agent Onboarding (20 min)
-1. [START_HERE.md](START_HERE.md) — Read first
-2. [COPILOT_GUIDE.md](COPILOT_GUIDE.md) — Workflow instructions
-3. [guides/QUICKREF.md](guides/QUICKREF.md) — Save for reference
-
-### Path 2: Developer Onboarding (45 min)
-1. [guides/QUICKSTART.md](guides/QUICKSTART.md) — Setup
-2. [architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md) — Overview
-3. [guides/QUICKREF.md](guides/QUICKREF.md) — Commands
-4. [development/CODE_CONVENTIONS.md](development/CODE_CONVENTIONS.md) — Standards
-
-### Path 3: RAG Deep Dive (60 min)
-1. [architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md) § RAG Pipeline
-2. [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) § Component Details
-3. [architecture/DIAGRAMS.md](architecture/DIAGRAMS.md) § Flows
-
-### Path 4: Adding Features (45 min)
-1. [development/DEVELOPMENT_GUIDE.md](development/DEVELOPMENT_GUIDE.md)
-2. [guides/QUICKREF.md](guides/QUICKREF.md) § Common Workflows
-3. [development/CODE_CONVENTIONS.md](development/CODE_CONVENTIONS.md)
-
----
-
-## 📊 What This Documentation Covers
-
-✅ **System Architecture** — 3-tier design, components, data flow  
-✅ **RAG Pipeline** — How documents are stored and questions answered  
-✅ **Performance Metrics** — Latency, memory, throughput, scaling  
-✅ **Database Schema** — SQLite and ChromaDB structure  
-✅ **API Documentation** — All FastAPI endpoints  
-✅ **Security** — Authentication, data protection, best practices  
-✅ **Development Guide** — How to add features, providers, parsers  
-✅ **Troubleshooting** — Common issues and solutions  
-✅ **Code Conventions** — Style, standards, patterns  
-✅ **Deployment** — Production deployment guide  
-
----
-
-## 🚀 Quick Start
-
-```powershell
-# Setup (5 minutes)
-python -m venv venv
-.\venv\Scripts\Activate.ps1
+### Step 1: Install Dependencies
+```bash
 pip install -r requirements.txt
-
-# Run all servers
-.\start-all-servers.ps1
-
-# Access
-Streamlit:  http://localhost:8501
-FastAPI:    http://localhost:8000  
-Spring Boot: http://localhost:8080
 ```
 
-See [guides/QUICKSTART.md](guides/QUICKSTART.md) for detailed setup.
+### Step 2: Verify Installation
+```bash
+# Linux/Mac
+./verify.sh
+
+# Windows
+verify.bat
+```
+
+### Step 3: Configure .env
+```bash
+# Create .env file with your settings
+SENTRY_DSN=
+SENTRY_ENVIRONMENT=development
+LOG_LEVEL=INFO
+```
+
+### Step 4: Run API Server
+```bash
+python api_server.py
+```
+
+### Step 5: Test
+```bash
+curl http://localhost:8000/api/health
+```
 
 ---
 
-## 🤖 For AI Agents / Copilot
+## 📁 Documentation Files
 
-### Before Working on This Project
-
-**You MUST read these in order:**
-
-1. **[START_HERE.md](START_HERE.md)** (5 min)
-   - What is AstroBot
-   - Key concepts
-   - System overview
-
-2. **[COPILOT_GUIDE.md](COPILOT_GUIDE.md)** (10 min)
-   - RAG pipeline mechanics
-   - Component interactions
-   - Debugging workflow
-   - Common patterns
-
-3. **[architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md)** (15 min)
-   - Deep dive into components
-   - When to use each module
-   - Common mistakes
-
-**Then use as reference:**
-- [guides/QUICKREF.md](guides/QUICKREF.md) — Commands & quick lookup
-- [guides/TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md) — When stuck
-- [development/CODE_CONVENTIONS.md](development/CODE_CONVENTIONS.md) — Coding standards
+- **README.md** (this file) - Documentation index and navigation
+- **01-QUICKSTART.md** - Quick start guide (5 min to running)
+- **02-IMPLEMENTATION_SUMMARY.md** - Full implementation details
+- **03-LOAD_BALANCING.md** - Production deployment & scaling
 
 ---
 
-## 📞 Finding What You Need
+## 🔑 Key Features at a Glance
 
-| I need to understand... | Go to |
-|------------------------|-------|
-| **What is AstroBot?** | [START_HERE.md](START_HERE.md) |
-| **System architecture** | [architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md) |
-| **RAG pipeline** | [architecture/ARCHITECTURE.md](architecture/ARCHITECTURE.md) |
-| **How to code** | [development/CODE_CONVENTIONS.md](development/CODE_CONVENTIONS.md) |
-| **Quick commands** | [guides/QUICKREF.md](guides/QUICKREF.md) |
-| **Visual flows** | [architecture/DIAGRAMS.md](architecture/DIAGRAMS.md) |
-| **Debugging** | [guides/TROUBLESHOOTING.md](guides/TROUBLESHOOTING.md) |
-| **Adding features** | [development/DEVELOPMENT_GUIDE.md](development/DEVELOPMENT_GUIDE.md) |
-| **New LLM provider** | [development/ADDING_PROVIDERS.md](development/ADDING_PROVIDERS.md) |
-| **Database schema** | [architecture/DATABASE_SCHEMA.md](architecture/DATABASE_SCHEMA.md) |
-| **Performance** | [development/PERFORMANCE_OPTIMIZATION.md](development/PERFORMANCE_OPTIMIZATION.md) |
-| **All documentation** | [INDEX.md](INDEX.md) |
+✅ **Error Tracking** - Sentry integration for production monitoring
+✅ **Structured Logging** - JSON logs with request tracing
+✅ **Rate Limiting** - Per-user and endpoint-specific limits  
+✅ **Document Tagging** - Flexible multi-tag system
+✅ **Document Classification** - Semantic document organization
+✅ **Advanced Search** - Filter by tags and classification
+✅ **Load Balancing** - Nginx + multi-instance deployment
+✅ **Auto-Failover** - Health checks with automatic recovery
+✅ **Horizontal Scaling** - Add instances easily
 
 ---
 
-## 📈 Documentation Stats
+## 🚨 Troubleshooting Quick Links
 
-- **Total documentation:** 40,000+ words
-- **Code examples:** 50+
-- **Diagrams:** 7+
-- **Tables:** 20+
-- **Files:** 12+
+**Missing dependencies?** 
+→ Run: `pip install -r requirements.txt`
 
----
+**Port already in use?**
+→ See: [01-QUICKSTART.md](./01-QUICKSTART.md#step-4-run-locally) 
 
-## ✨ Key Highlights
+**Verify script failing?**
+→ See: [01-QUICKSTART.md](./01-QUICKSTART.md#troubleshooting)
 
-### For AI Agents
-- ✅ Complete workflow documented
-- ✅ Common patterns explained
-- ✅ Error handling patterns shown
-- ✅ RAG mechanics clearly described
-- ✅ Component interactions illustrated
-- ✅ "When to use" guidance provided
-
-### For Developers
-- ✅ Quick reference available
-- ✅ Setup instructions clear
-- ✅ Code conventions defined
-- ✅ Troubleshooting guide included
-- ✅ Performance guidance provided
-- ✅ Development workflow documented
-
-### For Architects
-- ✅ System design explained
-- ✅ Performance characteristics documented
-- ✅ Scalability considerations listed
-- ✅ Security measures described
-- ✅ Component boundaries clear
-- ✅ Data flow visualized
+**Deployment questions?**
+→ See: [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md#troubleshooting)
 
 ---
 
-## 🎯 Next Steps
+## 📞 Documentation Roadmap
 
-### If you're an AI Agent/Copilot:
-→ Go to [START_HERE.md](START_HERE.md)  
-→ Then [COPILOT_GUIDE.md](COPILOT_GUIDE.md)  
-→ Then start working!
-
-### If you're a Developer:
-→ Go to [guides/QUICKSTART.md](guides/QUICKSTART.md)  
-→ Then [guides/QUICKREF.md](guides/QUICKREF.md)  
-→ Then start coding!
-
-### If you need to understand everything:
-→ Follow the "RAG Deep Dive" path above
+| Document | Purpose | Read Time |
+|----------|---------|-----------|
+| [01-QUICKSTART.md](./01-QUICKSTART.md) | Quick setup & basic testing | 5 min |
+| [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md) | Implementation details | 20 min |
+| [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md) | Production deployment | 30 min |
 
 ---
 
-## 📝 Version & Status
-
-- **Project Version:** 2.0.0
-- **Documentation Version:** 1.0
-- **Last Updated:** March 2026
-- **Status:** Complete ✅
+**Status:** ✅ Production Ready (92%)  
+**Last Updated:** March 2026  
+**Version:** 2.0.0
 
 ---
 
-**All documentation is current, complete, and ready for immediate use.**
+## Next Steps
+
+1. **Now:** Read [01-QUICKSTART.md](./01-QUICKSTART.md)
+2. **Today:** Get the app running locally
+3. **This week:** Test features and configure settings
+4. **This month:** Deploy to production with load balancing

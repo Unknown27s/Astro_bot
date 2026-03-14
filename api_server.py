@@ -15,9 +15,27 @@ from typing import Optional
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form
+# ── Initialize Logging & Error Tracking ──
+from log_config import get_logger, setup_logging
+from log_config.sentry_config import init_sentry
+
+setup_logging()
+init_sentry()
+logger = get_logger(__name__)
+
+# Now import standard library logging after custom modules are loaded
+import logging
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# ── Initialize Rate Limiting ──
+from middleware.rate_limiter import get_limiter, log_rate_limit_exceeded
+from slowapi.errors import RateLimitExceeded
+
+limiter = get_limiter()
+app_instance_limiter = limiter  # Will be assigned after app creation
 
 # ── Initialize database on import ──
 from database.db import (
@@ -40,6 +58,16 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# Assign limiter to app
+app.state.limiter = limiter
+
+# Import middleware
+from middleware.request_tracking import RequestTrackingMiddleware, ErrorContextMiddleware
+
+# Add middleware (order matters: error context first, then request tracking, then CORS)
+app.add_middleware(ErrorContextMiddleware)
+app.add_middleware(RequestTrackingMiddleware)
+
 # Allow Spring Boot (or any frontend) to call this API
 app.add_middleware(
     CORSMiddleware,
@@ -48,6 +76,47 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Rate Limiting Exception Handler ──
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded):
+    """Handle rate limit exceeded errors."""
+    log_rate_limit_exceeded(request, exc)
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Rate limit exceeded",
+            "retry_after": "60",
+        },
+        headers={"Retry-After": "60"},
+    )
+
+
+# ── Global Exception Handler ──
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Capture all unhandled exceptions and log them."""
+    request_id = getattr(request.state, "request_id", "unknown")
+
+    logger.error(
+        f"Unhandled exception: {str(exc)}",
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+            "method": request.method,
+        },
+        exc_info=True,
+    )
+
+    # Return error response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": request_id,
+        },
+    )
 
 
 # ═══════════════════════════════════════════════════════
@@ -107,7 +176,8 @@ class ProviderSettingsRequest(BaseModel):
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/auth/login")
-def api_login(req: LoginRequest):
+@limiter.limit("5/minute")  # Brute force protection
+def api_login(req: LoginRequest, request: Request):
     """Authenticate a user and return user info."""
     user = authenticate_user(req.username, req.password)
     if not user:
@@ -121,7 +191,8 @@ def api_login(req: LoginRequest):
 
 
 @app.post("/api/auth/register")
-def api_register(req: RegisterRequest):
+@limiter.limit("5/minute")  # Registration rate limit
+def api_register(req: RegisterRequest, request: Request):
     """Register a new user account."""
     if req.role not in ("student", "faculty"):
         raise HTTPException(status_code=400, detail="Role must be 'student' or 'faculty'")
@@ -136,7 +207,8 @@ def api_register(req: RegisterRequest):
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/chat", response_model=ChatResponse)
-def api_chat(req: ChatRequest):
+@limiter.limit("5/minute")  # Expensive LLM operation - strict limit
+def api_chat(req: ChatRequest, request: Request):
     """Send a query through the RAG pipeline and get a response."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
     from rag.generator import generate_response
@@ -174,8 +246,23 @@ def api_chat(req: ChatRequest):
                 sources=source_names,
                 response_time_ms=elapsed_ms,
             )
+            logger.info(
+                f"Query logged successfully",
+                extra={
+                    "user_id": req.user_id,
+                    "response_time_ms": round(elapsed_ms, 2),
+                    "sources": source_names,
+                }
+            )
     except Exception as e:
-        print(f"[API] Error logging query: {e}")
+        logger.error(
+            f"Error logging query: {str(e)}",
+            extra={
+                "user_id": req.user_id,
+                "query": req.query[:100],
+            },
+            exc_info=True,
+        )
 
     return ChatResponse(
         response=response_text,
@@ -200,9 +287,11 @@ def api_chat_status():
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/documents/upload")
+@limiter.limit("10/minute")  # File uploads are I/O intensive
 def api_upload_document(
     file: UploadFile = File(...),
     uploaded_by: str = Form(None),  # Make it optional with default None
+    request: Request = Depends(),
 ):
     """Upload, parse, chunk, and index a document."""
     from ingestion.parser import parse_document
@@ -263,8 +352,35 @@ def api_upload_document(
 
 @app.get("/api/documents")
 def api_list_documents():
-    """List all uploaded documents."""
-    return get_all_documents()
+    """List all uploaded documents with their tags and classifications."""
+    from database.db import get_document_tags, get_document_classification
+
+    docs = get_all_documents()
+
+    # Enrich each document with tags and classification
+    enriched_docs = []
+    for doc in docs:
+        doc_dict = dict(doc) if hasattr(doc, 'keys') else doc
+        doc_id = doc_dict.get('id')
+
+        # Add tags
+        try:
+            doc_dict['tags'] = get_document_tags(doc_id)
+        except Exception as e:
+            logger.debug(f"Failed to get tags for doc {doc_id}: {e}")
+            doc_dict['tags'] = []
+
+        # Add classification
+        try:
+            classification = get_document_classification(doc_id)
+            doc_dict['classification'] = classification
+        except Exception as e:
+            logger.debug(f"Failed to get classification for doc {doc_id}: {e}")
+            doc_dict['classification'] = None
+
+        enriched_docs.append(doc_dict)
+
+    return enriched_docs
 
 
 @app.delete("/api/documents/{doc_id}")
@@ -286,6 +402,156 @@ def api_delete_document(doc_id: str):
         os.remove(file_path)
 
     return {"message": f"Deleted: {deleted['original_name']}"}
+
+
+# ═══════════════════════════════════════════════════════
+# TAGGING & CLASSIFICATION ENDPOINTS (Phase 3)
+# ═══════════════════════════════════════════════════════
+
+class TagRequest(BaseModel):
+    name: str
+    description: str = ""
+    color: str = "#808080"
+
+class TagUpdateRequest(BaseModel):
+    name: str = None
+    description: str = None
+    color: str = None
+
+class ClassificationRequest(BaseModel):
+    classification: str
+    confidence: float = 1.0
+    auto_classified: bool = False
+    notes: str = None
+
+
+@app.post("/api/documents/tags")
+@limiter.limit("30/minute")  # Create tags - admin feature
+def api_create_tag(req: TagRequest, request: Request):
+    """Create a new tag."""
+    from database.db import create_tag
+    user_id = request.headers.get("X-User-ID", "system")
+    tag_id = create_tag(req.name, req.description, req.color, user_id)
+    if not tag_id:
+        raise HTTPException(status_code=409, detail="Tag name already exists")
+    logger.info(f"Tag created: {req.name}")
+    return {"id": tag_id, "name": req.name}
+
+
+@app.get("/api/documents/tags")
+@limiter.limit("60/minute")  # List tags - read-heavy
+def api_list_tags(request: Request):
+    """Get all tags with usage counts."""
+    from database.db import get_all_tags
+    return get_all_tags()
+
+
+@app.put("/api/documents/tags/{tag_id}")
+@limiter.limit("30/minute")  # Update tags
+def api_update_tag(tag_id: str, req: TagUpdateRequest, request: Request):
+    """Update a tag."""
+    from database.db import update_tag
+    success = update_tag(tag_id, req.name, req.description, req.color)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update tag")
+    logger.info(f"Tag updated: {tag_id}")
+    return {"message": "Tag updated"}
+
+
+@app.delete("/api/documents/tags/{tag_id}")
+@limiter.limit("30/minute")  # Delete tags
+def api_delete_tag(tag_id: str, request: Request):
+    """Delete a tag."""
+    from database.db import delete_tag
+    success = delete_tag(tag_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to delete tag")
+    logger.info(f"Tag deleted: {tag_id}")
+    return {"message": "Tag deleted"}
+
+
+@app.post("/api/documents/{doc_id}/tags/{tag_id}")
+@limiter.limit("30/minute")  # Add tags to documents
+def api_add_tag_to_document(doc_id: str, tag_id: str, request: Request):
+    """Add a tag to a document."""
+    from database.db import add_tag_to_document
+    user_id = request.headers.get("X-User-ID", "system")
+    success = add_tag_to_document(doc_id, tag_id, user_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to add tag (may already exist)")
+    logger.info(f"Tag {tag_id} added to document {doc_id}")
+    return {"message": "Tag added"}
+
+
+@app.delete("/api/documents/{doc_id}/tags/{tag_id}")
+@limiter.limit("30/minute")  # Remove tags
+def api_remove_tag_from_document(doc_id: str, tag_id: str, request: Request):
+    """Remove a tag from a document."""
+    from database.db import remove_tag_from_document
+    success = remove_tag_from_document(doc_id, tag_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to remove tag")
+    logger.info(f"Tag {tag_id} removed from document {doc_id}")
+    return {"message": "Tag removed"}
+
+
+@app.get("/api/documents/{doc_id}/tags")
+@limiter.limit("60/minute")  # Get document tags
+def api_get_document_tags(doc_id: str, request: Request):
+    """Get all tags for a document."""
+    from database.db import get_document_tags
+    return {"tags": get_document_tags(doc_id)}
+
+
+@app.post("/api/documents/{doc_id}/classify")
+@limiter.limit("30/minute")  # Set classification
+def api_set_classification(doc_id: str, req: ClassificationRequest, request: Request):
+    """Set or update a document's classification."""
+    from database.db import set_document_classification
+    user_id = request.headers.get("X-User-ID", "system")
+    success = set_document_classification(
+        doc_id,
+        req.classification,
+        req.confidence,
+        req.auto_classified,
+        user_id,
+        req.notes
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to set classification")
+    logger.info(f"Document {doc_id} classified as: {req.classification}")
+    return {"message": "Document classified"}
+
+
+@app.get("/api/documents/{doc_id}/classify")
+@limiter.limit("60/minute")  # Get classification
+def api_get_classification(doc_id: str, request: Request):
+    """Get classification for a document."""
+    from database.db import get_document_classification
+    classification = get_document_classification(doc_id)
+    if not classification:
+        return {"classification": None}
+    return {"classification": classification}
+
+
+@app.get("/api/documents/search")
+@limiter.limit("30/minute")  # Search with filters
+def api_search_documents(request: Request, tags: str = None, classification: str = None):
+    """Search/filter documents by tags and/or classification."""
+    from database.db import filter_documents_by_tags, get_documents_by_classification, get_all_documents
+
+    results = []
+
+    if tags:
+        tag_ids = tags.split(",")
+        results = filter_documents_by_tags(tag_ids)
+    elif classification:
+        results = get_documents_by_classification(classification)
+    else:
+        results = get_all_documents()
+
+    logger.debug(f"Document search: tags={tags}, classification={classification}, results={len(results)}")
+    return {"documents": results, "total": len(results)}
 
 
 # ═══════════════════════════════════════════════════════

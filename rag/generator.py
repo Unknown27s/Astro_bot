@@ -4,9 +4,13 @@ Routes queries through the configured LLM provider(s) via ProviderManager.
 Falls back to context-only mode if no provider is available.
 """
 
+import logging
+import time
 from config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT, CONV_ENABLED
 from rag.providers.manager import get_manager, reset_manager
 from rag.memory import query_memory, add_memory_entry
+
+logger = logging.getLogger(__name__)
 
 
 def get_llm_status() -> dict:
@@ -47,11 +51,15 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
     Returns:
         Dictionary with keys: response (str), from_memory (bool), memory_id (str or None)
     """
+    start_time = time.time()
+
     # Step 1: Check conversation memory if enabled
     if CONV_ENABLED and query:
         try:
             memory_result = query_memory(query, user_id=user_id)
             if memory_result:
+                elapsed = (time.time() - start_time) * 1000
+                logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
                 return {
                     "response": memory_result["response"],
                     "from_memory": True,
@@ -59,7 +67,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
                 }
         except Exception as e:
             # Memory check failed, continue with LLM generation
-            print(f"⚠️ Memory query failed: {e}")
+            logger.warning(f"Memory query failed: {e}")
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
@@ -70,6 +78,9 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
         f"QUESTION: {query}"
     )
 
+    logger.debug(f"Generating response for query: {query[:100]}...")
+    gen_start = time.time()
+
     result = mgr.generate(
         system_prompt=SYSTEM_PROMPT,
         user_message=user_message,
@@ -77,8 +88,12 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
         max_tokens=MODEL_MAX_TOKENS,
     )
 
+    gen_elapsed = (time.time() - gen_start) * 1000
+    logger.info(f"LLM generation completed in {gen_elapsed:.1f}ms")
+
     if not result:
         # All providers failed — use fallback
+        logger.warning("All LLM providers failed, using fallback response")
         result = _fallback_response(query, context)
 
     # Step 3: Store in memory for future queries (if enabled)
@@ -97,7 +112,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
             }
         except Exception as e:
             # Memory storage failed, but still return the response
-            print(f"⚠️ Failed to store in memory: {e}")
+            logger.warning(f"Failed to store response in memory: {e}")
             return {
                 "response": result,
                 "from_memory": False,

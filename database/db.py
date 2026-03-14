@@ -101,8 +101,81 @@ def init_db():
     """)
 
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_conversation_memory_expires 
+        CREATE INDEX IF NOT EXISTS idx_conversation_memory_expires
         ON conversation_memory(expires_at)
+    """)
+
+    # ── Tags table (Phase 3) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            color TEXT DEFAULT '#808080',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Document-Tag Junction (many-to-many) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_tags (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            added_by TEXT,
+            added_at TEXT NOT NULL,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+            FOREIGN KEY (added_by) REFERENCES users(id),
+            UNIQUE(document_id, tag_id)
+        )
+    """)
+
+    # ── Classifications table ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_classifications (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL UNIQUE,
+            classification TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            auto_classified INTEGER DEFAULT 0,
+            classified_by TEXT,
+            classified_at TEXT NOT NULL,
+            notes TEXT,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (classified_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Classification Templates table ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS classification_templates (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Create indexes for tagging ──
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_document_tags_doc ON document_tags(document_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_doc_classification ON document_classifications(classification)
     """)
 
     # ── Create default admin if not exists ──
@@ -434,6 +507,205 @@ def clear_all_memory() -> int:
         deleted = cursor.rowcount
         conn.commit()
         return deleted
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════
+# TAGS & CLASSIFICATION (Phase 3)
+# ═══════════════════════════════════════════
+
+def create_tag(name: str, description: str, color: str, created_by: str) -> Optional[str]:
+    """Create a new tag. Returns tag ID or None."""
+    tag_id = str(uuid.uuid4())
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO tags (id, name, description, color, created_by, created_at) VALUES (?,?,?,?,?,?)",
+            (tag_id, name, description, color, created_by, datetime.now().isoformat()),
+        )
+        conn.commit()
+        return tag_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+
+def get_all_tags() -> list[dict]:
+    """Get all tags with usage counts."""
+    conn = get_connection()
+    try:
+        tags = conn.execute("""
+            SELECT t.id, t.name, t.description, t.color, t.created_by, t.created_at,
+                   COUNT(dt.id) as usage_count
+            FROM tags t
+            LEFT JOIN document_tags dt ON t.id = dt.tag_id
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
+        """).fetchall()
+        return [dict(t) for t in tags]
+    finally:
+        conn.close()
+
+
+def update_tag(tag_id: str, name: str = None, description: str = None, color: str = None) -> bool:
+    """Update tag properties."""
+    conn = get_connection()
+    try:
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if color is not None:
+            updates.append("color = ?")
+            params.append(color)
+
+        if updates:
+            params.append(tag_id)
+            conn.execute(f"UPDATE tags SET {', '.join(updates)} WHERE id = ?", params)
+            conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def delete_tag(tag_id: str) -> bool:
+    """Delete a tag and its associations."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM document_tags WHERE tag_id = ?", (tag_id,))
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def add_tag_to_document(doc_id: str, tag_id: str, added_by: str) -> bool:
+    """Add a tag to a document."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO document_tags (id, document_id, tag_id, added_by, added_at) VALUES (?,?,?,?,?)",
+            (str(uuid.uuid4()), doc_id, tag_id, added_by, datetime.now().isoformat()),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def remove_tag_from_document(doc_id: str, tag_id: str) -> bool:
+    """Remove a tag from a document."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM document_tags WHERE document_id = ? AND tag_id = ?", (doc_id, tag_id))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_tags(doc_id: str) -> list[dict]:
+    """Get all tags for a document."""
+    conn = get_connection()
+    try:
+        tags = conn.execute("""
+            SELECT t.id, t.name, t.description, t.color
+            FROM tags t
+            JOIN document_tags dt ON t.id = dt.tag_id
+            WHERE dt.document_id = ?
+            ORDER BY t.name
+        """, (doc_id,)).fetchall()
+        return [dict(t) for t in tags]
+    finally:
+        conn.close()
+
+
+def set_document_classification(doc_id: str, classification: str, confidence: float = 1.0, auto_classified: bool = False, classified_by: str = None, notes: str = None) -> bool:
+    """Set or update classification for a document."""
+    conn = get_connection()
+    try:
+        # Check if already exists
+        existing = conn.execute("SELECT id FROM document_classifications WHERE document_id = ?", (doc_id,)).fetchone()
+
+        if existing:
+            conn.execute(
+                "UPDATE document_classifications SET classification = ?, confidence = ?, auto_classified = ?, classified_by = ?, classified_at = ?, notes = ? WHERE document_id = ?",
+                (classification, confidence, int(auto_classified), classified_by, datetime.now().isoformat(), notes, doc_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO document_classifications (id, document_id, classification, confidence, auto_classified, classified_by, classified_at, notes) VALUES (?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), doc_id, classification, confidence, int(auto_classified), classified_by, datetime.now().isoformat(), notes),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_classification(doc_id: str) -> Optional[dict]:
+    """Get classification for a document."""
+    conn = get_connection()
+    try:
+        classification = conn.execute("SELECT * FROM document_classifications WHERE document_id = ?", (doc_id,)).fetchone()
+        return dict(classification) if classification else None
+    finally:
+        conn.close()
+
+
+def get_documents_by_classification(classification: str) -> list[dict]:
+    """Get all documents with a specific classification."""
+    conn = get_connection()
+    try:
+        docs = conn.execute("""
+            SELECT d.* FROM documents d
+            JOIN document_classifications dc ON d.id = dc.document_id
+            WHERE dc.classification = ?
+            ORDER BY d.uploaded_at DESC
+        """, (classification,)).fetchall()
+        return [dict(d) for d in docs]
+    finally:
+        conn.close()
+
+
+def filter_documents_by_tags(tag_ids: list[str]) -> list[dict]:
+    """Get documents that have ALL of the specified tags."""
+    if not tag_ids:
+        return []
+
+    conn = get_connection()
+    try:
+        placeholders = ','.join(['?' for _ in tag_ids])
+        docs = conn.execute(f"""
+            SELECT d.* FROM documents d
+            WHERE d.id IN (
+                SELECT document_id FROM document_tags
+                WHERE tag_id IN ({placeholders})
+                GROUP BY document_id
+                HAVING COUNT(DISTINCT tag_id) = ?
+            )
+            ORDER BY d.uploaded_at DESC
+        """, tag_ids + [len(tag_ids)]).fetchall()
+        return [dict(d) for d in docs]
     finally:
         conn.close()
 

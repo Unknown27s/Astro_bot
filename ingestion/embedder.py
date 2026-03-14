@@ -4,11 +4,14 @@ Generates embeddings using sentence-transformers and stores in ChromaDB.
 """
 
 import os
+import logging
 import threading
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+
+logger = logging.getLogger(__name__)
 
 # Use cached model files without making network requests
 os.environ.setdefault("HF_HUB_OFFLINE", "1")
@@ -28,9 +31,9 @@ def get_embedding_model() -> SentenceTransformer:
     with _model_lock:
         if _embedding_model is not None:
             return _embedding_model
-        print(f"[Embedder] Loading embedding model: {EMBEDDING_MODEL}...")
+        logger.info(f"Loading embedding model: {EMBEDDING_MODEL}...")
         _embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-        print("[Embedder] Embedding model loaded.")
+        logger.info("Embedding model loaded successfully")
         return _embedding_model
 
 
@@ -42,12 +45,12 @@ def get_chroma_client() -> chromadb.ClientAPI:
     with _chroma_lock:
         if _chroma_client is not None:
             return _chroma_client
-        print("[Embedder] Initializing ChromaDB client...")
+        logger.info("Initializing ChromaDB client...")
         _chroma_client = chromadb.PersistentClient(
             path=str(CHROMA_PERSIST_DIR),
             settings=Settings(anonymized_telemetry=False),
         )
-        print("[Embedder] ChromaDB client ready.")
+        logger.info("ChromaDB client ready")
         return _chroma_client
 
 
@@ -114,8 +117,9 @@ def delete_doc_chunks(doc_id: str):
         results = collection.get(where={"doc_id": doc_id})
         if results and results["ids"]:
             collection.delete(ids=results["ids"])
+            logger.debug(f"Deleted {len(results['ids'])} chunks for document: {doc_id}")
     except Exception as e:
-        print(f"[Embedder] Error deleting chunks for doc {doc_id}: {e}")
+        logger.error(f"Error deleting chunks for doc {doc_id}: {e}", exc_info=True)
 
 
 def get_collection_stats() -> dict:

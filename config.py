@@ -82,10 +82,29 @@ CONV_TTL_DAYS = int(os.getenv("CONV_TTL_DAYS", "90"))
 # Minimum usage count to keep entry during pruning
 CONV_MIN_USAGE_FOR_KEEP = int(os.getenv("CONV_MIN_USAGE_FOR_KEEP", "1"))
 
-# ── Conversation Memory (Semantic Cache) ──
-CONV_ENABLED = os.getenv("CONV_ENABLED", "true").lower() == "true"
-CONV_MATCH_THRESHOLD = float(os.getenv("CONV_MATCH_THRESHOLD", "0.88"))
-CONV_PERSIST_COLLECTION = os.getenv("CONV_PERSIST_COLLECTION", "conversation_memory")
-CONV_PER_USER = os.getenv("CONV_PER_USER", "false").lower() == "true"
-CONV_TTL_DAYS = int(os.getenv("CONV_TTL_DAYS", "90"))
-CONV_MIN_USAGE_FOR_KEEP = int(os.getenv("CONV_MIN_USAGE_FOR_KEEP", "1"))
+# ── Error Tracking & Logging (Phase 1) ──
+SENTRY_DSN = os.getenv("SENTRY_DSN", "")
+SENTRY_ENVIRONMENT = os.getenv("SENTRY_ENVIRONMENT", "development")
+SENTRY_TRACES_SAMPLE_RATE = float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1"))
+SENTRY_ERROR_SAMPLE_RATE = float(os.getenv("SENTRY_ERROR_SAMPLE_RATE", "1.0"))
+
+# Logging configuration
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_DIR = BASE_DIR / "logs"
+LOG_FILE_PATH = LOG_DIR / "astrobot.log"
+LOG_MAX_BYTES = int(os.getenv("LOG_MAX_BYTES", "10485760"))  # 10MB
+LOG_BACKUP_COUNT = int(os.getenv("LOG_BACKUP_COUNT", "10"))
+
+# Ensure logs directory exists
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+# ── Rate Limiting (Phase 2) ──
+RATE_LIMIT_GLOBAL = os.getenv("RATE_LIMIT_GLOBAL", "100/minute")
+RATE_LIMIT_PER_USER = os.getenv("RATE_LIMIT_PER_USER", "30/minute")
+RATE_LIMIT_CHAT = os.getenv("RATE_LIMIT_CHAT", "5/minute")
+RATE_LIMIT_UPLOAD = os.getenv("RATE_LIMIT_UPLOAD", "10/minute")
+RATE_LIMIT_AUTH = os.getenv("RATE_LIMIT_AUTH", "5/minute")
+
+#  ── Document Tagging (Phase 3) ──
+DEFAULT_CLASSIFICATIONS = ["Policy", "Handbook", "Procedure", "Academic", "Administrative", "Finance", "HR", "Archived", "Other"]
+
