@@ -52,7 +52,7 @@ echo.
 REM 1. Start Python API Server
 echo 1. Starting Python FastAPI Server...
 start "AstroBot - Python API Server" cmd /k "python api_server.py"
-echo    - Running on http://localhost:8000/docs
+echo    - Running on http://localhost:8001/docs
 echo    - New terminal window opened
 echo.
 timeout /t 2 /nobreak
@@ -82,8 +82,8 @@ echo.
 echo SERVICES RUNNING:
 echo.
 echo   1. Python FastAPI API
-echo      URL: http://localhost:8000
-echo      Docs: http://localhost:8000/docs
+echo      URL: http://localhost:8001
+echo      Docs: http://localhost:8001/docs
 echo.
 echo   2. React Frontend
 echo      URL: http://localhost:5173

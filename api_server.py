@@ -15,19 +15,48 @@ from typing import Optional
 # Ensure project root is in path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form
+# ── Initialize Logging & Error Tracking ──
+from log_config import get_logger, setup_logging
+from log_config.sentry_config import init_sentry
+
+setup_logging()
+init_sentry()
+logger = get_logger(__name__)
+
+# Now import standard library logging after custom modules are loaded
+import logging
+from functools import lru_cache
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+# ── Constants ──
+HEADER_USER_ID = "X-User-ID"
+DEFAULT_USER_ID = "system"
+RATE_LIMIT_ADMIN_TIER = "30/minute"
+RATE_LIMIT_RESET_TIER = "10/minute"
+
+# ── Initialize Rate Limiting ──
+from middleware.rate_limiter import get_limiter, log_rate_limit_exceeded
+from slowapi.errors import RateLimitExceeded
+
+limiter = get_limiter()
+app_instance_limiter = limiter  # Will be assigned after app creation
 
 # ── Initialize database on import ──
 from database.db import (
     init_db, authenticate_user, create_user, get_all_users,
     toggle_user_active, delete_user, add_document, get_all_documents,
     delete_document, log_query, get_query_logs, get_analytics, get_connection,
+    store_memory, delete_memory, cleanup_expired_memory, invalidate_memory_by_source,
+    get_memory_stats, clear_all_memory,
+    get_all_rate_limits, get_rate_limit, update_rate_limit, toggle_rate_limit, reset_rate_limits_to_default,
+    get_suggestions,
 )
 from config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
-    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR,
+    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED,
 )
 
 init_db()
@@ -38,6 +67,16 @@ app = FastAPI(
     version="2.0.0",
 )
 
+# Assign limiter to app
+app.state.limiter = limiter
+
+# Import middleware
+from middleware.request_tracking import RequestTrackingMiddleware, ErrorContextMiddleware
+
+# Add middleware (order matters: error context first, then request tracking, then CORS)
+app.add_middleware(ErrorContextMiddleware)
+app.add_middleware(RequestTrackingMiddleware)
+
 # Allow Spring Boot (or any frontend) to call this API
 app.add_middleware(
     CORSMiddleware,
@@ -46,6 +85,59 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Rate Limiting Exception Handler ──
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_exception_handler(request: Request, exc: RateLimitExceeded):
+    """Handle rate limit exceeded errors."""
+    log_rate_limit_exceeded(request, exc)
+    return JSONResponse(
+        status_code=429,
+        content={
+            "detail": "Rate limit exceeded",
+            "retry_after": "60",
+        },
+        headers={"Retry-After": "60"},
+    )
+
+
+# ── Global Exception Handler ──
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """Capture all unhandled exceptions and log them."""
+    request_id = getattr(request.state, "request_id", "unknown")
+
+    logger.error(
+        f"Unhandled exception: {str(exc)}",
+        extra={
+            "request_id": request_id,
+            "path": request.url.path,
+            "method": request.method,
+        },
+        exc_info=True,
+    )
+
+    # Return error response
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": "Internal server error",
+            "request_id": request_id,
+        },
+    )
+
+
+# ── Helper Functions ──
+def get_user_id(request: Request) -> str:
+    """Extract user ID from request headers with consistent default."""
+    return request.headers.get(HEADER_USER_ID, DEFAULT_USER_ID)
+
+
+@lru_cache(maxsize=1, typed=False)
+def get_all_rate_limits_cached():
+    """Get all rate limit configurations with 10-second cache."""
+    return get_all_rate_limits()
 
 
 # ═══════════════════════════════════════════════════════
@@ -105,7 +197,8 @@ class ProviderSettingsRequest(BaseModel):
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/auth/login")
-def api_login(req: LoginRequest):
+@limiter.limit("5/minute")  # Brute force protection
+def api_login(req: LoginRequest, request: Request):
     """Authenticate a user and return user info."""
     user = authenticate_user(req.username, req.password)
     if not user:
@@ -119,7 +212,8 @@ def api_login(req: LoginRequest):
 
 
 @app.post("/api/auth/register")
-def api_register(req: RegisterRequest):
+@limiter.limit("5/minute")  # Registration rate limit
+def api_register(req: RegisterRequest, request: Request):
     """Register a new user account."""
     if req.role not in ("student", "faculty"):
         raise HTTPException(status_code=400, detail="Role must be 'student' or 'faculty'")
@@ -134,7 +228,8 @@ def api_register(req: RegisterRequest):
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/chat", response_model=ChatResponse)
-def api_chat(req: ChatRequest):
+@limiter.limit("5/minute")  # Expensive LLM operation - strict limit
+def api_chat(req: ChatRequest, request: Request):
     """Send a query through the RAG pipeline and get a response."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
     from rag.generator import generate_response
@@ -147,30 +242,54 @@ def api_chat(req: ChatRequest):
     # Step 2: Format context for LLM
     context = format_context_for_llm(chunks)
 
-    # Step 3: Generate response
-    response = generate_response(req.query, context)
+    # Step 3: Generate response (now includes memory handling)
+    gen_result = generate_response(req.query, context, user_id=req.user_id, sources=[c.get("source", "") for c in chunks])
+    
+    # Extract response from dict
+    response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+    from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
+    memory_id = gen_result.get("memory_id") if isinstance(gen_result, dict) else None
 
     # Step 4: Get citations
     citations = get_source_citations(chunks)
 
     elapsed_ms = (time.time() - start_time) * 1000
 
-    # Log query
+    # Log query (but note if from memory for analytics)
     try:
         source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
+        # ALWAYS log the query (even if from memory) to ensure Admin Analytics is accurate
+        # and popular questions are tracked correctly.
+        log_response_text = f"[⚡ CACHED] {response_text}" if from_memory else response_text
+        
         log_query(
             user_id=req.user_id,
             username=req.username,
             query_text=req.query,
-            response_text=response[:500],
+            response_text=log_response_text[:500],
             sources=source_names,
             response_time_ms=elapsed_ms,
         )
+        logger.info(
+            f"Query logged successfully",
+            extra={
+                "user_id": req.user_id,
+                "response_time_ms": round(elapsed_ms, 2),
+                "sources": source_names,
+            }
+        )
     except Exception as e:
-        print(f"[API] Error logging query: {e}")
+        logger.error(
+            f"Error logging query: {str(e)}",
+            extra={
+                "user_id": req.user_id,
+                "query": req.query[:100],
+            },
+            exc_info=True,
+        )
 
     return ChatResponse(
-        response=response,
+        response=response_text,
         sources=chunks,
         citations=citations,
         response_time_ms=round(elapsed_ms, 1),
@@ -188,54 +307,122 @@ def api_chat_status():
 
 
 # ═══════════════════════════════════════════════════════
+# SUGGESTIONS / AUTOCOMPLETE ENDPOINT
+# ═══════════════════════════════════════════════════════
+
+@app.get("/api/suggestions")
+@limiter.limit("30/minute")
+def api_get_suggestions(request: Request, q: str = "", user_id: str = None):
+    """Get autocomplete suggestions for the chat input.
+    
+    Returns recent user questions, popular questions, and preset suggestions.
+    """
+    result = get_suggestions(query_prefix=q, user_id=user_id)
+    return result
+
+
+
+# ═══════════════════════════════════════════════════════
 # DOCUMENT MANAGEMENT ENDPOINTS
 # ═══════════════════════════════════════════════════════
 
 @app.post("/api/documents/upload")
+@limiter.limit("10/minute")  # File uploads are I/O intensive
 def api_upload_document(
+    request: Request,  # Required for rate limiter key extraction
     file: UploadFile = File(...),
-    uploaded_by: str = Form(...),
+    uploaded_by: str = Form(None),  # Make it optional with default None
 ):
-    """Upload, parse, chunk, and index a document."""
+    """Upload, parse, chunk, and index a document (admin only if uploaded_by is provided)."""
     from ingestion.parser import parse_document
     from ingestion.chunker import chunk_document
     from ingestion.embedder import store_chunks
 
+    # ── Admin-only check (only if uploaded_by is provided) ──
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can upload documents")
+
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}")
+        raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
 
     # Save file to disk
     safe_name = f"{int(time.time())}_{file.filename}"
     file_path = UPLOAD_DIR / safe_name
     content = file.file.read()
+
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    # Validate file size (max 50MB)
+    MAX_FILE_SIZE = 50 * 1024 * 1024
+    if len(content) > MAX_FILE_SIZE:
+        raise HTTPException(status_code=413, detail=f"File too large ({len(content) / 1024 / 1024:.1f}MB). Maximum: 50MB")
+
     with open(file_path, "wb") as f:
         f.write(content)
 
+    # ── Check if PDF is password-protected ──
+    if file_ext == ".pdf":
+        try:
+            from PyPDF2 import PdfReader
+            pdf_reader = PdfReader(file_path)
+            if pdf_reader.is_encrypted:
+                os.remove(file_path)
+                logger.warning(f"Locked PDF rejected: {file.filename}")
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"❌ PDF is password-protected. Please remove the password and try again."
+                )
+        except HTTPException:
+            raise  # Re-raise our custom error
+        except Exception as e:
+            logger.debug(f"PDF encryption check error for {file.filename}: {e}")
+            # Don't block on encryption check errors, let parsing handle it
+
     # Parse document
-    text = parse_document(str(file_path))
+    text, parse_error = parse_document(str(file_path))
     if not text:
         os.remove(file_path)
-        raise HTTPException(status_code=422, detail="Failed to extract text from document")
+        error_detail = parse_error or "Failed to extract text from document"
+        logger.warning(f"Document parse failed for {file.filename}: {error_detail}")
+        raise HTTPException(status_code=422, detail=error_detail)
 
     # Chunk document
     chunks = chunk_document(text, source_name=file.filename)
     if not chunks:
         os.remove(file_path)
-        raise HTTPException(status_code=422, detail="No chunks generated from document")
+        raise HTTPException(status_code=422, detail="No chunks generated from document (text may be too short)")
 
     # Record in database
-    doc_id = add_document(
-        filename=safe_name,
-        original_name=file.filename,
-        file_type=file_ext,
-        file_size=len(content),
-        chunk_count=len(chunks),
-        uploaded_by=uploaded_by,
-    )
+    try:
+        doc_id = add_document(
+            filename=safe_name,
+            original_name=file.filename,
+            file_type=file_ext,
+            file_size=len(content),
+            chunk_count=len(chunks),
+            uploaded_by=uploaded_by,
+        )
+    except Exception as e:
+        os.remove(file_path)
+        logger.error(f"Database error for {file.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to record document in database: {str(e)}")
 
     # Store embeddings in ChromaDB
-    stored = store_chunks(chunks, doc_id)
+    try:
+        stored = store_chunks(chunks, doc_id)
+    except Exception as e:
+        logger.error(f"ChromaDB error for doc {doc_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to index document in vector database: {str(e)}")
 
     return {
         "doc_id": doc_id,
@@ -256,20 +443,205 @@ def api_delete_document(doc_id: str):
     """Delete a document and its chunks."""
     from ingestion.embedder import delete_doc_chunks
 
-    # Delete from ChromaDB
-    delete_doc_chunks(doc_id)
+    try:
+        # Delete from ChromaDB first (chunks)
+        try:
+            delete_doc_chunks(doc_id)
+        except Exception as e:
+            logger.warning(f"Failed to delete ChromaDB chunks for {doc_id}: {e}")
+            # Continue with database deletion even if ChromaDB fails
 
-    # Delete from database
-    deleted = delete_document(doc_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Document not found")
+        # Delete from database
+        deleted = delete_document(doc_id)
+        if not deleted:
+            raise HTTPException(status_code=404, detail="Document not found")
 
-    # Delete physical file
-    file_path = UPLOAD_DIR / deleted["filename"]
-    if file_path.exists():
-        os.remove(file_path)
+        # Delete physical file
+        file_path = UPLOAD_DIR / deleted["filename"]
+        if file_path.exists():
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                logger.warning(f"Failed to delete file {file_path}: {e}")
 
-    return {"message": f"Deleted: {deleted['original_name']}"}
+        return {"message": f"Deleted: {deleted['original_name']}"}
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting document {doc_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to delete document: {str(e)}")
+
+
+@app.get("/api/documents/stats")
+def api_documents_stats():
+    """Get knowledge base statistics (total chunks indexed)."""
+    from ingestion.embedder import get_collection_stats
+
+    try:
+        stats = get_collection_stats()
+        return stats
+    except Exception as e:
+        logger.error(f"Error getting collection stats: {e}")
+        return {"total_chunks": 0, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════
+# TAGGING & CLASSIFICATION ENDPOINTS (Phase 3)
+# ═══════════════════════════════════════════════════════
+
+class TagRequest(BaseModel):
+    name: str
+    description: str = ""
+    color: str = "#808080"
+
+class TagUpdateRequest(BaseModel):
+    name: str = None
+    description: str = None
+    color: str = None
+
+class ClassificationRequest(BaseModel):
+    classification: str
+    confidence: float = 1.0
+    auto_classified: bool = False
+    notes: str = None
+
+class UpdateRateLimitRequest(BaseModel):
+    limit_requests: int
+    limit_window_seconds: int
+    enabled: bool = True
+
+class ToggleRateLimitRequest(BaseModel):
+    enabled: bool
+
+
+@app.post("/api/documents/tags")
+@limiter.limit("30/minute")  # Create tags - admin feature
+def api_create_tag(req: TagRequest, request: Request):
+    """Create a new tag."""
+    from database.db import create_tag
+    user_id = request.headers.get("X-User-ID", "system")
+    tag_id = create_tag(req.name, req.description, req.color, user_id)
+    if not tag_id:
+        raise HTTPException(status_code=409, detail="Tag name already exists")
+    logger.info(f"Tag created: {req.name}")
+    return {"id": tag_id, "name": req.name}
+
+
+@app.get("/api/documents/tags")
+@limiter.limit("60/minute")  # List tags - read-heavy
+def api_list_tags(request: Request):
+    """Get all tags with usage counts."""
+    from database.db import get_all_tags
+    return get_all_tags()
+
+
+@app.put("/api/documents/tags/{tag_id}")
+@limiter.limit("30/minute")  # Update tags
+def api_update_tag(tag_id: str, req: TagUpdateRequest, request: Request):
+    """Update a tag."""
+    from database.db import update_tag
+    success = update_tag(tag_id, req.name, req.description, req.color)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to update tag")
+    logger.info(f"Tag updated: {tag_id}")
+    return {"message": "Tag updated"}
+
+
+@app.delete("/api/documents/tags/{tag_id}")
+@limiter.limit("30/minute")  # Delete tags
+def api_delete_tag(tag_id: str, request: Request):
+    """Delete a tag."""
+    from database.db import delete_tag
+    success = delete_tag(tag_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to delete tag")
+    logger.info(f"Tag deleted: {tag_id}")
+    return {"message": "Tag deleted"}
+
+
+@app.post("/api/documents/{doc_id}/tags/{tag_id}")
+@limiter.limit("30/minute")  # Add tags to documents
+def api_add_tag_to_document(doc_id: str, tag_id: str, request: Request):
+    """Add a tag to a document."""
+    from database.db import add_tag_to_document
+    user_id = request.headers.get("X-User-ID", "system")
+    success = add_tag_to_document(doc_id, tag_id, user_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to add tag (may already exist)")
+    logger.info(f"Tag {tag_id} added to document {doc_id}")
+    return {"message": "Tag added"}
+
+
+@app.delete("/api/documents/{doc_id}/tags/{tag_id}")
+@limiter.limit("30/minute")  # Remove tags
+def api_remove_tag_from_document(doc_id: str, tag_id: str, request: Request):
+    """Remove a tag from a document."""
+    from database.db import remove_tag_from_document
+    success = remove_tag_from_document(doc_id, tag_id)
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to remove tag")
+    logger.info(f"Tag {tag_id} removed from document {doc_id}")
+    return {"message": "Tag removed"}
+
+
+@app.get("/api/documents/{doc_id}/tags")
+@limiter.limit("60/minute")  # Get document tags
+def api_get_document_tags(doc_id: str, request: Request):
+    """Get all tags for a document."""
+    from database.db import get_document_tags
+    return {"tags": get_document_tags(doc_id)}
+
+
+@app.post("/api/documents/{doc_id}/classify")
+@limiter.limit("30/minute")  # Set classification
+def api_set_classification(doc_id: str, req: ClassificationRequest, request: Request):
+    """Set or update a document's classification."""
+    from database.db import set_document_classification
+    user_id = request.headers.get("X-User-ID", "system")
+    success = set_document_classification(
+        doc_id,
+        req.classification,
+        req.confidence,
+        req.auto_classified,
+        user_id,
+        req.notes
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to set classification")
+    logger.info(f"Document {doc_id} classified as: {req.classification}")
+    return {"message": "Document classified"}
+
+
+@app.get("/api/documents/{doc_id}/classify")
+@limiter.limit("60/minute")  # Get classification
+def api_get_classification(doc_id: str, request: Request):
+    """Get classification for a document."""
+    from database.db import get_document_classification
+    classification = get_document_classification(doc_id)
+    if not classification:
+        return {"classification": None}
+    return {"classification": classification}
+
+
+@app.get("/api/documents/search")
+@limiter.limit("30/minute")  # Search with filters
+def api_search_documents(request: Request, tags: str = None, classification: str = None):
+    """Search/filter documents by tags and/or classification."""
+    from database.db import filter_documents_by_tags, get_documents_by_classification, get_all_documents
+
+    results = []
+
+    if tags:
+        tag_ids = tags.split(",")
+        results = filter_documents_by_tags(tag_ids)
+    elif classification:
+        results = get_documents_by_classification(classification)
+    else:
+        results = get_all_documents()
+
+    logger.debug(f"Document search: tags={tags}, classification={classification}, results={len(results)}")
+    return {"documents": results, "total": len(results)}
 
 
 # ═══════════════════════════════════════════════════════
@@ -389,6 +761,25 @@ def api_health():
             "message": "Directory missing",
         }
 
+    # Conversation memory (if enabled)
+    if CONV_ENABLED:
+        try:
+            mem_stats = get_memory_stats()
+            components["memory"] = {
+                "status": "ok",
+                "message": f"{mem_stats['total_entries']} cached entries",
+            }
+        except Exception as e:
+            components["memory"] = {
+                "status": "warning",
+                "message": f"Error: {str(e)}",
+            }
+    else:
+        components["memory"] = {
+            "status": "warning",
+            "message": "Disabled",
+        }
+
     # Overall status aggregation
     overall_status = "healthy"
     for comp in components.values():
@@ -505,6 +896,7 @@ def api_test_provider(provider: str):
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
 
+@app.get("/api/documents/stats")
 @app.get("/api/knowledge-base/stats")
 def api_knowledge_base_stats():
     """Get vector DB collection stats."""
@@ -548,6 +940,133 @@ def _reload_config_module():
     import config
     importlib.reload(config)
 
+
+# ═══════════════════════════════════════════════════════
+# CONVERSATION MEMORY ENDPOINTS (Admin)
+# ═══════════════════════════════════════════════════════
+
+@app.get("/api/memory/stats")
+def api_memory_stats():
+    """Get statistics on conversation memory usage."""
+    if not CONV_ENABLED:
+        return {"enabled": False, "message": "Conversation memory is disabled"}
+    try:
+        stats = get_memory_stats()
+        return {"enabled": True, "stats": stats}
+    except Exception as e:
+        return {"enabled": True, "error": str(e)}
+
+
+@app.delete("/api/memory/{memory_id}")
+def api_delete_memory(memory_id: str):
+    """Delete a specific memory entry by ID."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        success = delete_memory(memory_id)
+        if success:
+            return {"deleted": True, "id": memory_id}
+        else:
+            raise HTTPException(status_code=404, detail="Memory entry not found")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/cleanup")
+def api_memory_cleanup():
+    """Trigger manual cleanup of expired memory entries."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        deleted = cleanup_expired_memory()
+        return {"deleted": deleted, "message": f"Cleaned up {deleted} expired entries"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/memory/clear")
+def api_memory_clear():
+    """Clear all conversation memory entries (admin only, use with caution)."""
+    if not CONV_ENABLED:
+        raise HTTPException(status_code=400, detail="Conversation memory is disabled")
+    try:
+        total = clear_all_memory()
+        return {"cleared": True, "total_deleted": total}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════
+# RATE LIMITING CONFIGURATION (Admin)
+# ═══════════════════════════════════════════════════════
+
+@app.get("/api/admin/rate-limits")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_get_rate_limits(request: Request):
+    """Get all rate limit configurations (admin only)."""
+    try:
+        limits = get_all_rate_limits()
+        return {"rate_limits": limits}
+    except Exception as e:
+        logger.error(f"Error fetching rate limits: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to fetch rate limits")
+
+
+@app.put("/api/admin/rate-limits/{endpoint}")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_update_rate_limit(request: Request, endpoint: str, req: UpdateRateLimitRequest):
+    """Update rate limit configuration for an endpoint (admin only)."""
+    if req.limit_requests <= 0 or req.limit_window_seconds <= 0:
+        raise HTTPException(status_code=400, detail="Limits must be positive integers")
+
+    # Check if endpoint exists
+    existing = get_rate_limit(endpoint)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Endpoint '{endpoint}' not found")
+
+    success = update_rate_limit(endpoint, req.limit_requests, req.limit_window_seconds, req.enabled, get_user_id(request))
+    if not success:
+        raise HTTPException(status_code=500, detail="Database update failed")
+
+    # Return actual stored values, not request params
+    updated_limit = get_rate_limit(endpoint)
+    logger.info(f"Rate limit updated for {endpoint}: {req.limit_requests} requests/{req.limit_window_seconds}s, enabled={req.enabled}")
+    return {"updated": True, "rate_limit": updated_limit}
+
+
+@app.patch("/api/admin/rate-limits/{endpoint}/toggle")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_toggle_rate_limit(request: Request, endpoint: str, req: ToggleRateLimitRequest):
+    """Enable/disable rate limiting for an endpoint (admin only)."""
+    existing = get_rate_limit(endpoint)
+    if not existing:
+        raise HTTPException(status_code=404, detail=f"Endpoint '{endpoint}' not found")
+
+    success = toggle_rate_limit(endpoint, req.enabled, get_user_id(request))
+    if not success:
+        raise HTTPException(status_code=500, detail="Database update failed")
+
+    # Return actual stored values
+    updated_limit = get_rate_limit(endpoint)
+    logger.info(f"Rate limit toggled for {endpoint}: enabled={req.enabled}")
+    return {"toggled": True, "rate_limit": updated_limit}
+
+
+@app.post("/api/admin/rate-limits/reset")
+@limiter.limit(RATE_LIMIT_RESET_TIER)
+def api_reset_rate_limits(request: Request):
+    """Reset all rate limits to default values (admin only, dangerous)."""
+    success = reset_rate_limits_to_default()
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to reset rate limits")
+
+    logger.warning(f"Rate limits reset to default by {get_user_id(request)}")
+    return {"reset": True, "message": "All rate limits have been reset to default values"}
+
+@app.get("/api/documents/stats")  # ← ADD THIS
+def api_documents_stats():
+    from ingestion.embedder import get_collection_stats
+    return get_collection_stats()
 
 # ═══════════════════════════════════════════════════════
 # ENTRY POINT

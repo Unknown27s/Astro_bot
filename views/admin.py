@@ -5,6 +5,7 @@ Document management + AI Settings page.
 
 import os
 import time
+import logging
 import streamlit as st
 from pathlib import Path
 
@@ -16,8 +17,15 @@ from config import (
     OLLAMA_BASE_URL, OLLAMA_MODEL,
     GROQ_API_KEY, GROQ_MODEL,
     GEMINI_API_KEY, GEMINI_MODEL,
+    CONV_ENABLED,
 )
-from database.db import get_all_documents, delete_document, add_document
+
+# Setup logger
+logger = logging.getLogger(__name__)
+from database.db import (
+    get_all_documents, delete_document, add_document,
+    get_memory_stats, cleanup_expired_memory, clear_all_memory, delete_memory,
+)
 from ingestion.parser import parse_document
 from ingestion.chunker import chunk_document
 from ingestion.embedder import store_chunks, delete_doc_chunks, get_collection_stats
@@ -34,8 +42,10 @@ def render_admin_page():
 def _render_document_management():
     """Document upload and management section."""
 
+    MAX_FILE_SIZE = 50 * 1024 * 1024  # 50MB limit
+
     st.subheader("Upload Documents")
-    st.caption(f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}")
+    st.caption(f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))} | Max size: 50MB per file")
 
     uploaded_files = st.file_uploader(
         "Choose files to upload",
@@ -47,11 +57,20 @@ def _render_document_management():
     if uploaded_files and st.button("📤 Process & Upload", type="primary", use_container_width=True):
         progress_bar = st.progress(0)
         status_text = st.empty()
+        success_count = 0
+        error_count = 0
 
         for idx, uploaded_file in enumerate(uploaded_files):
             file_ext = Path(uploaded_file.name).suffix.lower()
             if file_ext not in SUPPORTED_EXTENSIONS:
-                st.warning(f"Skipping unsupported file: {uploaded_file.name}")
+                st.warning(f"⚠️ Skipping unsupported file: {uploaded_file.name}")
+                error_count += 1
+                continue
+
+            # Validate file size
+            if uploaded_file.size > MAX_FILE_SIZE:
+                st.warning(f"⚠️ File too large ({uploaded_file.size / 1024 / 1024:.1f}MB). Max: 50MB — {uploaded_file.name}")
+                error_count += 1
                 continue
 
             status_text.text(f"Processing {uploaded_file.name}...")
@@ -59,40 +78,101 @@ def _render_document_management():
             # Save file to disk
             safe_name = f"{int(time.time())}_{uploaded_file.name}"
             file_path = UPLOAD_DIR / safe_name
-            with open(file_path, "wb") as f:
-                f.write(uploaded_file.getbuffer())
+            try:
+                with open(file_path, "wb") as f:
+                    f.write(uploaded_file.getbuffer())
+            except Exception as e:
+                st.error(f"❌ Failed to save file {uploaded_file.name}: {str(e)}")
+                logger.error(f"File save error for {uploaded_file.name}: {e}")
+                error_count += 1
+                continue
+
+            # ── Check if PDF is password-protected ──
+            if file_ext == ".pdf":
+                try:
+                    from PyPDF2 import PdfReader
+                    pdf_reader = PdfReader(str(file_path))
+                    if pdf_reader.is_encrypted:
+                        st.error(f"❌ {uploaded_file.name}: PDF is password-protected. Please remove the password and try again.")
+                        logger.warning(f"Locked PDF rejected: {uploaded_file.name}")
+                        try:
+                            os.remove(file_path)
+                        except:
+                            pass
+                        error_count += 1
+                        continue
+                except HTTPException:
+                    raise  # Re-raise our validation error
+                except Exception as e:
+                    logger.debug(f"PDF encryption check error for {uploaded_file.name}: {e}")
+                    # Don't block on encryption check errors, let parsing handle it
 
             # Parse document
-            text = parse_document(str(file_path))
+            text, parse_error = parse_document(str(file_path))
             if not text:
-                st.error(f"Failed to extract text from {uploaded_file.name}")
+                error_msg = parse_error or "Failed to extract text from document"
+                st.error(f"❌ Parse error in {uploaded_file.name}: {error_msg}")
+                logger.warning(f"Document parse failed for {uploaded_file.name}: {error_msg}")
+                # Clean up file on parse failure
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                error_count += 1
                 continue
 
             # Chunk document
             chunks = chunk_document(text, source_name=uploaded_file.name)
             if not chunks:
-                st.error(f"No chunks generated from {uploaded_file.name}")
+                st.error(f"❌ No chunks generated from {uploaded_file.name} (text may be too short)")
+                logger.warning(f"No chunks generated for {uploaded_file.name}")
+                # Clean up file on chunk failure
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                error_count += 1
                 continue
 
             # Record in database
-            doc_id = add_document(
-                filename=safe_name,
-                original_name=uploaded_file.name,
-                file_type=file_ext,
-                file_size=uploaded_file.size,
-                chunk_count=len(chunks),
-                uploaded_by=st.session_state.user_id,
-            )
+            try:
+                doc_id = add_document(
+                    filename=safe_name,
+                    original_name=uploaded_file.name,
+                    file_type=file_ext,
+                    file_size=uploaded_file.size,
+                    chunk_count=len(chunks),
+                    uploaded_by=st.session_state.user_id,
+                )
+            except Exception as e:
+                st.error(f"❌ Database error for {uploaded_file.name}: {str(e)}")
+                logger.error(f"Database insert failed for {uploaded_file.name}: {e}")
+                # Clean up file on database failure
+                try:
+                    os.remove(file_path)
+                except:
+                    pass
+                error_count += 1
+                continue
 
             # Store embeddings in ChromaDB
-            stored = store_chunks(chunks, doc_id)
+            try:
+                stored = store_chunks(chunks, doc_id)
+                st.success(f"✅ {uploaded_file.name} — {stored} chunks indexed")
+                success_count += 1
+            except Exception as e:
+                st.error(f"❌ Failed to index {uploaded_file.name} in vector database: {str(e)}")
+                logger.error(f"ChromaDB error for doc {doc_id}: {e}")
+                error_count += 1
+                continue
 
-            st.success(f"✅ {uploaded_file.name} — {stored} chunks indexed")
             progress_bar.progress((idx + 1) / len(uploaded_files))
 
-        status_text.text("All files processed!")
-        time.sleep(1)
-        st.rerun()
+        # Summary
+        status_text.text(f"Processing complete: {success_count} succeeded, {error_count} failed")
+        if success_count > 0:
+            time.sleep(1)
+            st.rerun()
 
     # ── Existing Documents ──
     st.divider()
@@ -424,3 +504,114 @@ def _reset_providers():
     # Also clear cached health data
     st.session_state.pop("system_health", None)
     st.session_state.pop("health_check_time", None)
+
+
+def render_memory_page():
+    """Render conversation memory management page."""
+    
+    if not CONV_ENABLED:
+        st.warning("💾 Conversation memory is currently disabled. Enable it in AI Settings.", icon="⚠️")
+        return
+    
+    st.markdown("### 💾 Conversation Memory Management")
+    st.caption("View, analyze, and manage semantic cached Q&A pairs")
+    st.divider()
+
+    # Tabs for different management views
+    tab1, tab2, tab3 = st.tabs(["📊 Statistics", "🗑️ Cleanup", "⚙️ Settings"])
+
+    # ── Tab 1: Statistics ──
+    with tab1:
+        st.subheader("Memory Statistics")
+        
+        try:
+            stats = get_memory_stats()
+            
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric(
+                    "Total Entries",
+                    stats["total_entries"],
+                    help="Number of cached Q&A pairs"
+                )
+            with col2:
+                st.metric(
+                    "Avg Usage per Entry",
+                    f"{stats['avg_usage_per_entry']:.1f}x",
+                    help="Average number of times each entry was used"
+                )
+            with col3:
+                st.metric(
+                    "By User",
+                    len(stats["by_user"]),
+                    help="Number of users with cached entries"
+                )
+            
+            if stats["by_user"]:
+                st.subheader("Usage by User")
+                user_data = []
+                for item in stats["by_user"]:
+                    user_data.append({
+                        "User ID": item.get("user_id", "Global"),
+                        "Entries": item.get("cnt", 0),
+                        "Total Usage": item.get("total_usage", 0),
+                    })
+                st.dataframe(user_data, use_container_width=True)
+            else:
+                st.info("No cached entries yet. They will be created as queries are answered.", icon="ℹ️")
+        
+        except Exception as e:
+            st.error(f"Error loading statistics: {e}")
+
+    # ── Tab 2: Cleanup ──
+    with tab2:
+        st.subheader("Manual Cleanup")
+        st.caption("Remove expired or low-usage entries from cache")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            if st.button("🧹 Run Cleanup", type="primary", use_container_width=True):
+                try:
+                    with st.spinner("Cleaning up expired entries..."):
+                        deleted = cleanup_expired_memory()
+                    st.success(f"✅ Cleanup complete: {deleted} entries removed", icon="✅")
+                except Exception as e:
+                    st.error(f"Cleanup failed: {e}")
+        
+        with col2:
+            if st.button("🗑️ Clear All Memory", type="secondary", use_container_width=True):
+                if st.session_state.get("confirm_clear_memory", False):
+                    try:
+                        with st.spinner("Clearing all memory..."):
+                            total = clear_all_memory()
+                        st.success(f"✅ All memory cleared: {total} entries deleted", icon="✅")
+                        st.session_state["confirm_clear_memory"] = False
+                    except Exception as e:
+                        st.error(f"Clear failed: {e}")
+                else:
+                    st.warning("Click again to confirm clearing ALL memory", icon="⚠️")
+                    st.session_state["confirm_clear_memory"] = True
+
+    # ── Tab 3: Settings ──
+    with tab3:
+        st.subheader("Memory Configuration")
+        
+        try:
+            import config
+            
+            st.info(
+                f"""
+                **Current Settings:**
+                - **Status**: {'Enabled ✅' if CONV_ENABLED else 'Disabled ⚠️'}
+                - **Similarity Threshold**: {config.CONV_MATCH_THRESHOLD}
+                - **TTL (Days)**: {config.CONV_TTL_DAYS}
+                - **Min Usage to Keep**: {config.CONV_MIN_USAGE_FOR_KEEP}
+                - **Per-User Memory**: {'Yes' if config.CONV_PER_USER else 'No (Global)'}
+                
+                Edit these settings in `.env` and restart the server.
+                """,
+                icon="⚙️"
+            )
+        except Exception as e:
+            st.warning(f"Could not load config: {e}")

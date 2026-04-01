@@ -22,7 +22,7 @@ public class DocumentController {
     @PostMapping("/upload")
     public ResponseEntity<?> upload(
             @RequestParam("file") MultipartFile file,
-            @RequestParam("uploaded_by") String uploadedBy) {
+            @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
         try {
             Map<String, Object> result = pythonApi.uploadDocument(file, uploadedBy);
             return ResponseEntity.ok(result);

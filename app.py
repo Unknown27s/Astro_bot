@@ -22,7 +22,7 @@ st.set_page_config(
 # ── Imports ──
 from auth.auth import init_session_state, login, logout, register_user
 from views.chat import render_chat_page
-from views.admin import render_admin_page, render_ai_settings_page
+from views.admin import render_admin_page, render_ai_settings_page, render_memory_page
 from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 
 
@@ -30,8 +30,15 @@ from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 # LIGHTWEIGHT HEALTH CHECK (admin only)
 # ═══════════════════════════════════════════════════════
 
+@st.cache_resource(ttl=60)  # Cache health check results for 60 seconds
 def _check_system_health() -> dict:
-    """Lightweight health checks — no external LLM provider calls."""
+    """Lightweight health checks — no external LLM provider calls.
+
+    Cached for 60 seconds to reduce startup time and improve page switching performance.
+    - Removed embedding import check (loads lazily on first query anyway)
+    - Removed file counting in uploads directory (too slow with many files)
+    - Kept: SQLite connectivity, ChromaDB directory, LLM mode config
+    """
     health = {}
     try:
         from database.db import get_connection
@@ -54,17 +61,9 @@ def _check_system_health() -> dict:
     # LLM mode only (no provider network calls here)
     health["llm_mode"] = {"status": "ok", "message": LLM_MODE}
 
-    try:
-        import sentence_transformers
-        health["embeddings"] = {"status": "ok", "message": f"{EMBEDDING_MODEL} (lazy load)"}
-    except ImportError:
-        health["embeddings"] = {"status": "error", "message": "Package missing"}
+    # SKIPPED: Embedding import check → loads lazily on first use, no need to check on startup
+    # SKIPPED: File counting in uploads directory → too slow if directory has thousands of files
 
-    if UPLOAD_DIR.exists():
-        fc = len([f for f in UPLOAD_DIR.iterdir() if f.is_file()])
-        health["uploads"] = {"status": "ok", "message": f"{fc} files"}
-    else:
-        health["uploads"] = {"status": "error", "message": "Directory missing"}
     return health
 
 
@@ -304,7 +303,7 @@ def run_admin_dashboard():
 
         page = st.radio(
             "Navigate",
-            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "💬 Test Chat"],
+            ["📄 Documents", "📊 Analytics", "👥 Users", "🤖 AI Settings", "💾 Memory", "💬 Test Chat"],
             label_visibility="collapsed",
         )
 
@@ -334,10 +333,14 @@ def run_admin_dashboard():
             _render_users_page()
         elif page == "🤖 AI Settings":
             render_ai_settings_page()
+        elif page == "� Memory":
+            render_memory_page()
         elif page == "💬 Test Chat":
             render_chat_page()
     except Exception as e:
         st.error(f"Error: {e}")
+        import traceback
+        st.code(traceback.format_exc(), language="text")
         import traceback
         st.code(traceback.format_exc(), language="text")
 

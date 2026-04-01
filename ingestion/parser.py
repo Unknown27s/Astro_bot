@@ -14,13 +14,31 @@ def parse_pdf(file_path: str) -> str:
     """Extract text from a PDF file."""
     from PyPDF2 import PdfReader
 
-    reader = PdfReader(file_path)
-    text_parts = []
-    for page_num, page in enumerate(reader.pages, 1):
-        page_text = page.extract_text()
-        if page_text:
-            text_parts.append(f"[Page {page_num}]\n{page_text}")
-    return "\n\n".join(text_parts)
+    try:
+        reader = PdfReader(file_path)
+
+        # Check if PDF is encrypted/locked
+        if reader.is_encrypted:
+            # Try to decrypt with empty password (common for read-only PDFs)
+            if not reader.decrypt(""):
+                raise ValueError(
+                    "PDF is password-protected or encrypted. "
+                    "Please remove the password/encryption using Adobe Reader or similar tool, "
+                    "and try uploading again."
+                )
+
+        text_parts = []
+        for page_num, page in enumerate(reader.pages, 1):
+            page_text = page.extract_text()
+            if page_text:
+                text_parts.append(f"[Page {page_num}]\n{page_text}")
+        return "\n\n".join(text_parts)
+    except ValueError as e:
+        # Re-raise ValueError for encrypted PDFs (handled in parse_document)
+        raise
+    except Exception as e:
+        # Other PDF reading errors
+        raise
 
 
 def parse_docx(file_path: str) -> str:
@@ -135,18 +153,20 @@ PARSERS = {
 }
 
 
-def parse_document(file_path: str) -> Optional[str]:
+def parse_document(file_path: str) -> tuple[Optional[str], Optional[str]]:
     """
     Parse a document and return extracted text.
-    Returns None if the file type is unsupported or parsing fails.
+    Returns (text, None) on success, or (None, error_message) on failure.
     """
     ext = Path(file_path).suffix.lower()
     parser = PARSERS.get(ext)
     if not parser:
-        return None
+        return None, f"Unsupported file type: {ext}"
     try:
         text = parser(file_path)
-        return text.strip() if text else None
+        if not text or not text.strip():
+            return None, "Document appears to be empty or contains no extractable text"
+        return text.strip(), None
     except Exception as e:
         print(f"[Parser Error] {file_path}: {e}")
-        return None
+        return None, f"Failed to parse document: {str(e)}"

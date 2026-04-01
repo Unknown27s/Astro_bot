@@ -78,6 +78,145 @@ def init_db():
         )
     """)
 
+    # ── Conversation memory table (for semantic caching) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS conversation_memory (
+            id TEXT PRIMARY KEY,
+            query_text TEXT NOT NULL,
+            response_text TEXT NOT NULL,
+            sources TEXT,
+            user_id TEXT,
+            usage_count INTEGER DEFAULT 1,
+            created_at TEXT NOT NULL,
+            last_accessed TEXT,
+            expires_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
+    # Create index for faster queries
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_memory_user 
+        ON conversation_memory(user_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_conversation_memory_expires
+        ON conversation_memory(expires_at)
+    """)
+
+    # ── Tags table (Phase 3) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS tags (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            color TEXT DEFAULT '#808080',
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Document-Tag Junction (many-to-many) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_tags (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            tag_id TEXT NOT NULL,
+            added_by TEXT,
+            added_at TEXT NOT NULL,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (tag_id) REFERENCES tags(id) ON DELETE CASCADE,
+            FOREIGN KEY (added_by) REFERENCES users(id),
+            UNIQUE(document_id, tag_id)
+        )
+    """)
+
+    # ── Classifications table ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS document_classifications (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL UNIQUE,
+            classification TEXT NOT NULL,
+            confidence REAL DEFAULT 1.0,
+            auto_classified INTEGER DEFAULT 0,
+            classified_by TEXT,
+            classified_at TEXT NOT NULL,
+            notes TEXT,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE,
+            FOREIGN KEY (classified_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Classification Templates table ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS classification_templates (
+            id TEXT PRIMARY KEY,
+            name TEXT UNIQUE NOT NULL,
+            description TEXT,
+            created_by TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (created_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Create indexes for tagging ──
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_tags_name ON tags(name)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_document_tags_doc ON document_tags(document_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_document_tags_tag ON document_tags(tag_id)
+    """)
+
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_doc_classification ON document_classifications(classification)
+    """)
+
+    # ── Rate Limiting Configuration table (Admin controlled) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limit_configs (
+            id TEXT PRIMARY KEY,
+            endpoint TEXT UNIQUE NOT NULL,
+            limit_requests INTEGER NOT NULL,
+            limit_window_seconds INTEGER NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            description TEXT,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Create index for rate limit lookups ──
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_rate_limit_endpoint ON rate_limit_configs(endpoint)
+    """)
+
+    # ── Insert default rate limits if table is empty ──
+    default_limits = [
+        ('auth', 5, 60, 'Login/Register - brute-force protection'),
+        ('chat', 5, 60, 'LLM queries - expensive operations'),
+        ('documents/upload', 10, 60, 'Document uploads - resource intensive'),
+        ('documents/tags', 30, 60, 'Tag management - moderate load'),
+        ('documents/read', 60, 60, 'Read operations - list tags, documents'),
+        ('documents/classify', 30, 60, 'Classification operations'),
+        ('global', 100, 60, 'Global rate limit - all requests'),
+    ]
+
+    existing_limits = cursor.execute("SELECT COUNT(*) as cnt FROM rate_limit_configs").fetchone()['cnt']
+    if existing_limits == 0:
+        for endpoint, limit_req, window, desc in default_limits:
+            cursor.execute(
+                "INSERT INTO rate_limit_configs (id, endpoint, limit_requests, limit_window_seconds, description, updated_at) VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), endpoint, limit_req, window, desc, datetime.now().isoformat()),
+            )
+
     # ── Create default admin if not exists ──
     admin_exists = cursor.execute(
         "SELECT 1 FROM users WHERE username = ?", (ADMIN_USERNAME,)
@@ -227,6 +366,95 @@ def get_query_logs(limit: int = 100) -> list[dict]:
     return [dict(l) for l in logs]
 
 
+# ── Preset Suggestion Questions ──
+PRESET_QUESTIONS = [
+    "What are the admission requirements?",
+    "What is the fee structure for this semester?",
+    "What are the hostel facilities available?",
+    "What is the exam schedule?",
+    "How to apply for scholarships?",
+    "What are the placement statistics?",
+    "What is the attendance policy?",
+    "What courses are offered in Computer Science?",
+    "What are the library timings?",
+    "How to get a bonafide certificate?",
+    "What is the anti-ragging policy?",
+    "What are the sports facilities available?",
+    "How to contact the student grievance cell?",
+    "What is the syllabus for current semester?",
+    "What are the rules for internal assessment?",
+]
+
+
+def get_preset_questions(prefix: str = "", limit: int = 5) -> list[str]:
+    """Get preset/common questions that match a prefix."""
+    if not prefix:
+        return PRESET_QUESTIONS[:limit]
+    prefix_lower = prefix.lower()
+    matching = [q for q in PRESET_QUESTIONS if prefix_lower in q.lower()]
+    return matching[:limit]
+
+
+def get_suggestions(query_prefix: str, user_id: str = None, limit: int = 5) -> dict:
+    """
+    Get autocomplete suggestions from query_logs.
+
+    Returns:
+        Dict with 'recent' (user's own), 'popular' (all users), and 'preset' lists.
+    """
+    conn = get_connection()
+    try:
+        recent = []
+        popular = []
+        seen = set()  # track seen queries for deduplication
+
+        if query_prefix and len(query_prefix) >= 2:
+            search_pattern = f"%{query_prefix}%"
+
+            # 1) User's recent queries
+            if user_id:
+                rows = conn.execute(
+                    """SELECT DISTINCT query_text FROM query_logs
+                       WHERE user_id = ? AND query_text LIKE ?
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (user_id, search_pattern, limit),
+                ).fetchall()
+                for row in rows:
+                    q = row["query_text"]
+                    if q not in seen:
+                        recent.append(q)
+                        seen.add(q)
+
+            # 2) Popular queries across all users
+            rows = conn.execute(
+                """SELECT query_text, COUNT(*) as cnt FROM query_logs
+                   WHERE query_text LIKE ?
+                   GROUP BY query_text
+                   ORDER BY cnt DESC LIMIT ?""",
+                (search_pattern, limit + len(seen)),
+            ).fetchall()
+            for row in rows:
+                q = row["query_text"]
+                if q not in seen:
+                    popular.append(q)
+                    seen.add(q)
+                    if len(popular) >= limit:
+                        break
+
+        # 3) Preset questions (always included, filtered by prefix)
+        preset = get_preset_questions(query_prefix, limit)
+        # Remove presets already in recent/popular
+        preset = [q for q in preset if q not in seen]
+
+        return {
+            "recent": recent[:limit],
+            "popular": popular[:limit],
+            "preset": preset[:limit],
+        }
+    finally:
+        conn.close()
+
+
 def get_analytics() -> dict:
     """Get usage analytics summary."""
     conn = get_connection()
@@ -263,6 +491,443 @@ def get_analytics() -> dict:
         "daily_queries": [dict(d) for d in daily_queries],
         "top_users": [dict(u) for u in top_users],
     }
+
+
+# ═══════════════════════════════════════════
+# CONVERSATION MEMORY (Semantic Cache)
+# ═══════════════════════════════════════════
+
+def store_memory(memory_id: str, query_text: str, response_text: str, sources: str, user_id: str = None, expires_at: str = None):
+    """Store a conversation memory entry in SQLite."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO conversation_memory 
+               (id, query_text, response_text, sources, user_id, created_at, last_accessed, expires_at) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (memory_id, query_text, response_text, sources, user_id, datetime.now().isoformat(), datetime.now().isoformat(), expires_at),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def update_memory_usage(memory_id: str, similarity: float = None):
+    """Increment usage count and update last_accessed timestamp."""
+    conn = get_connection()
+    try:
+        # Just update usage count and last accessed time
+        # (similarity parameter kept for compatibility but not stored)
+        conn.execute(
+            "UPDATE conversation_memory SET usage_count = usage_count + 1, last_accessed = ? WHERE id = ?",
+            (datetime.now().isoformat(), memory_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def delete_memory(memory_id: str) -> bool:
+    """Delete a memory entry by ID."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM conversation_memory WHERE id = ?", (memory_id,))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def cleanup_expired_memory() -> int:
+    """Delete expired memory entries and low-usage old entries. Returns count deleted."""
+    from config import CONV_TTL_DAYS, CONV_MIN_USAGE_FOR_KEEP
+    
+    conn = get_connection()
+    try:
+        # Delete entries past TTL (unless high usage)
+        cursor = conn.execute(
+            """DELETE FROM conversation_memory 
+               WHERE expires_at IS NOT NULL AND expires_at < ? 
+               AND usage_count < ?""",
+            (datetime.now().isoformat(), CONV_MIN_USAGE_FOR_KEEP),
+        )
+        deleted_ttl = cursor.rowcount
+        
+        # Also delete very old entries (>180 days) regardless of usage
+        cursor = conn.execute(
+            """DELETE FROM conversation_memory 
+               WHERE created_at < datetime('now', '-180 days')""",
+        )
+        deleted_old = cursor.rowcount
+        
+        conn.commit()
+        return deleted_ttl + deleted_old
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def invalidate_memory_by_source(source_doc: str):
+    """Delete memory entries that reference a specific source document. Returns count deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute(
+            "DELETE FROM conversation_memory WHERE sources LIKE ?",
+            (f"%{source_doc}%",),
+        )
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    except Exception as e:
+        conn.rollback()
+        raise e
+    finally:
+        conn.close()
+
+
+def get_memory_stats() -> dict:
+    """Get statistics about stored memories."""
+    conn = get_connection()
+    try:
+        total = conn.execute("SELECT COUNT(*) as cnt FROM conversation_memory").fetchone()["cnt"]
+        
+        # Query with LEFT JOIN to get actual usernames from users table
+        by_user_raw = conn.execute("""
+            SELECT 
+                COALESCE(u.username, 'Global') as username,
+                COUNT(*) as cnt, 
+                AVG(cm.usage_count) as avg_usage
+            FROM conversation_memory cm
+            LEFT JOIN users u ON cm.user_id = u.id
+            GROUP BY cm.user_id
+            ORDER BY cnt DESC
+        """).fetchall()
+        
+        avg_usage = conn.execute("SELECT AVG(usage_count) as avg FROM conversation_memory").fetchone()["avg"]
+        
+        # Transform by_user data to match React expectations
+        by_user = []
+        for row in by_user_raw:
+            by_user.append({
+                "username": row["username"],
+                "entries": row["cnt"],
+                "avg_usage": round(row["avg_usage"], 2) if row["avg_usage"] else 0
+            })
+        
+        return {
+            "total_entries": total,
+            "avg_usage_per_entry": round(avg_usage, 2) if avg_usage else 0,
+            "by_user": by_user,
+        }
+    finally:
+        conn.close()
+
+
+def clear_all_memory() -> int:
+    """Clear all conversation memory entries. Returns count deleted."""
+    conn = get_connection()
+    try:
+        cursor = conn.execute("DELETE FROM conversation_memory")
+        deleted = cursor.rowcount
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════
+# TAGS & CLASSIFICATION (Phase 3)
+# ═══════════════════════════════════════════
+
+def create_tag(name: str, description: str, color: str, created_by: str) -> Optional[str]:
+    """Create a new tag. Returns tag ID or None."""
+    tag_id = str(uuid.uuid4())
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO tags (id, name, description, color, created_by, created_at) VALUES (?,?,?,?,?,?)",
+            (tag_id, name, description, color, created_by, datetime.now().isoformat()),
+        )
+        conn.commit()
+        return tag_id
+    except sqlite3.IntegrityError:
+        return None
+    finally:
+        conn.close()
+
+
+def get_all_tags() -> list[dict]:
+    """Get all tags with usage counts."""
+    conn = get_connection()
+    try:
+        tags = conn.execute("""
+            SELECT t.id, t.name, t.description, t.color, t.created_by, t.created_at,
+                   COUNT(dt.id) as usage_count
+            FROM tags t
+            LEFT JOIN document_tags dt ON t.id = dt.tag_id
+            GROUP BY t.id
+            ORDER BY t.created_at DESC
+        """).fetchall()
+        return [dict(t) for t in tags]
+    finally:
+        conn.close()
+
+
+def update_tag(tag_id: str, name: str = None, description: str = None, color: str = None) -> bool:
+    """Update tag properties."""
+    conn = get_connection()
+    try:
+        updates = []
+        params = []
+        if name is not None:
+            updates.append("name = ?")
+            params.append(name)
+        if description is not None:
+            updates.append("description = ?")
+            params.append(description)
+        if color is not None:
+            updates.append("color = ?")
+            params.append(color)
+
+        if updates:
+            params.append(tag_id)
+            conn.execute(f"UPDATE tags SET {', '.join(updates)} WHERE id = ?", params)
+            conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def delete_tag(tag_id: str) -> bool:
+    """Delete a tag and its associations."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM document_tags WHERE tag_id = ?", (tag_id,))
+        conn.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def add_tag_to_document(doc_id: str, tag_id: str, added_by: str) -> bool:
+    """Add a tag to a document."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO document_tags (id, document_id, tag_id, added_by, added_at) VALUES (?,?,?,?,?)",
+            (str(uuid.uuid4()), doc_id, tag_id, added_by, datetime.now().isoformat()),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    finally:
+        conn.close()
+
+
+def remove_tag_from_document(doc_id: str, tag_id: str) -> bool:
+    """Remove a tag from a document."""
+    conn = get_connection()
+    try:
+        conn.execute("DELETE FROM document_tags WHERE document_id = ? AND tag_id = ?", (doc_id, tag_id))
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_tags(doc_id: str) -> list[dict]:
+    """Get all tags for a document."""
+    conn = get_connection()
+    try:
+        tags = conn.execute("""
+            SELECT t.id, t.name, t.description, t.color
+            FROM tags t
+            JOIN document_tags dt ON t.id = dt.tag_id
+            WHERE dt.document_id = ?
+            ORDER BY t.name
+        """, (doc_id,)).fetchall()
+        return [dict(t) for t in tags]
+    finally:
+        conn.close()
+
+
+def set_document_classification(doc_id: str, classification: str, confidence: float = 1.0, auto_classified: bool = False, classified_by: str = None, notes: str = None) -> bool:
+    """Set or update classification for a document."""
+    conn = get_connection()
+    try:
+        # Check if already exists
+        existing = conn.execute("SELECT id FROM document_classifications WHERE document_id = ?", (doc_id,)).fetchone()
+
+        if existing:
+            conn.execute(
+                "UPDATE document_classifications SET classification = ?, confidence = ?, auto_classified = ?, classified_by = ?, classified_at = ?, notes = ? WHERE document_id = ?",
+                (classification, confidence, int(auto_classified), classified_by, datetime.now().isoformat(), notes, doc_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO document_classifications (id, document_id, classification, confidence, auto_classified, classified_by, classified_at, notes) VALUES (?,?,?,?,?,?,?,?)",
+                (str(uuid.uuid4()), doc_id, classification, confidence, int(auto_classified), classified_by, datetime.now().isoformat(), notes),
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def get_document_classification(doc_id: str) -> Optional[dict]:
+    """Get classification for a document."""
+    conn = get_connection()
+    try:
+        classification = conn.execute("SELECT * FROM document_classifications WHERE document_id = ?", (doc_id,)).fetchone()
+        return dict(classification) if classification else None
+    finally:
+        conn.close()
+
+
+def get_documents_by_classification(classification: str) -> list[dict]:
+    """Get all documents with a specific classification."""
+    conn = get_connection()
+    try:
+        docs = conn.execute("""
+            SELECT d.* FROM documents d
+            JOIN document_classifications dc ON d.id = dc.document_id
+            WHERE dc.classification = ?
+            ORDER BY d.uploaded_at DESC
+        """, (classification,)).fetchall()
+        return [dict(d) for d in docs]
+    finally:
+        conn.close()
+
+
+def filter_documents_by_tags(tag_ids: list[str]) -> list[dict]:
+    """Get documents that have ALL of the specified tags."""
+    if not tag_ids:
+        return []
+
+    conn = get_connection()
+    try:
+        placeholders = ','.join(['?' for _ in tag_ids])
+        docs = conn.execute(f"""
+            SELECT d.* FROM documents d
+            WHERE d.id IN (
+                SELECT document_id FROM document_tags
+                WHERE tag_id IN ({placeholders})
+                GROUP BY document_id
+                HAVING COUNT(DISTINCT tag_id) = ?
+            )
+            ORDER BY d.uploaded_at DESC
+        """, tag_ids + [len(tag_ids)]).fetchall()
+        return [dict(d) for d in docs]
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════
+# RATE LIMITING CONFIGURATION (Admin)
+# ═══════════════════════════════════════════
+
+def get_all_rate_limits() -> list[dict]:
+    """Get all rate limit configurations."""
+    conn = get_connection()
+    try:
+        limits = conn.execute("""
+            SELECT id, endpoint, limit_requests, limit_window_seconds, enabled, description, updated_by, updated_at
+            FROM rate_limit_configs
+            ORDER BY endpoint
+        """).fetchall()
+        return [dict(l) for l in limits]
+    finally:
+        conn.close()
+
+
+def get_rate_limit(endpoint: str) -> Optional[dict]:
+    """Get rate limit configuration for a specific endpoint."""
+    conn = get_connection()
+    try:
+        limit = conn.execute(
+            "SELECT id, endpoint, limit_requests, limit_window_seconds, enabled, description, updated_by, updated_at FROM rate_limit_configs WHERE endpoint = ?",
+            (endpoint,)
+        ).fetchone()
+        return dict(limit) if limit else None
+    finally:
+        conn.close()
+
+
+def update_rate_limit(endpoint: str, limit_requests: int, limit_window_seconds: int, enabled: bool = True, updated_by: str = None) -> bool:
+    """Update rate limit configuration for an endpoint."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE rate_limit_configs SET limit_requests = ?, limit_window_seconds = ?, enabled = ?, updated_by = ?, updated_at = ? WHERE endpoint = ?",
+            (limit_requests, limit_window_seconds, int(enabled), updated_by, datetime.now().isoformat(), endpoint)
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def toggle_rate_limit(endpoint: str, enabled: bool, updated_by: str = None) -> bool:
+    """Enable/disable rate limiting for an endpoint."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE rate_limit_configs SET enabled = ?, updated_by = ?, updated_at = ? WHERE endpoint = ?",
+            (int(enabled), updated_by, datetime.now().isoformat(), endpoint)
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def reset_rate_limits_to_default() -> bool:
+    """Reset all rate limits to default values."""
+    conn = get_connection()
+    try:
+        default_limits = [
+            ('auth', 5, 60),
+            ('chat', 5, 60),
+            ('documents/upload', 10, 60),
+            ('documents/tags', 30, 60),
+            ('documents/read', 60, 60),
+            ('documents/classify', 30, 60),
+            ('global', 100, 60),
+        ]
+
+        for endpoint, limit_req, window in default_limits:
+            conn.execute(
+                "UPDATE rate_limit_configs SET limit_requests = ?, limit_window_seconds = ?, enabled = 1, updated_at = ? WHERE endpoint = ?",
+                (limit_req, window, datetime.now().isoformat(), endpoint)
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
 
 
 # Initialize on import

@@ -47,7 +47,8 @@ public class AnalyticsController {
             health.put("spring_boot", Map.of("status", "ok", "message", "Running"));
             return ResponseEntity.ok(health);
         } catch (Exception e) {
-            return ResponseEntity.ok(Map.of(
+            // Return 503 Service Unavailable when Python API is down
+            return ResponseEntity.status(503).body(Map.of(
                     "spring_boot", Map.of("status", "ok", "message", "Running"),
                     "python_api", Map.of("status", "error", "message", "Python API unreachable: " + e.getMessage())
             ));

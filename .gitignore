@@ -1,52 +1,92 @@
-# Virtual environment
+# ═══════════════════════════════════════
+# Python Environment & Cache
+# ═══════════════════════════════════════
 .venv/
 venv/
 env/
-
-# Python cache
 __pycache__/
 *.py[cod]
 *.pyo
 *.egg-info/
+.pytest_cache/
+.mypy_cache/
 dist/
 build/
 
-# Data files (generated at runtime)
-data/chroma_db/
-data/uploads/
-data/astrobot.db
-
-# Model files (too large for git)
-models/*.gguf
-
-# Environment secrets
+# ═══════════════════════════════════════
+# Runtime Data (Local Only)
+# ═══════════════════════════════════════
+data/
+!data/.gitkeep
 .env
+.env.local
+.env.*.local
 
+# ═══════════════════════════════════════
+# Model Files (Too Large)
+# ═══════════════════════════════════════
+models/*.gguf
+models/*.bin
+models/*.pth
+
+# ═══════════════════════════════════════
+# Node / NPM / React
+# ═══════════════════════════════════════
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+react-frontend/dist/
+react-frontend/.env
+react-frontend/.env.local
+.npm
+
+# ═══════════════════════════════════════
+# Spring Boot / Java / Maven
+# ═══════════════════════════════════════
+target/
+*.jar
+*.war
+*.ear
+*.class
+springboot-backend/target/
+springboot-backend/.mvn/
+**/.mvn/wrapper/
+*.log
+.classpath
+.project
+.settings/
+
+# ═══════════════════════════════════════
 # IDE
+# ═══════════════════════════════════════
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-workspace
+*.sublime-project
+*.iml
 
+# ═══════════════════════════════════════
 # OS
+# ═══════════════════════════════════════
 Thumbs.db
 Desktop.ini
 .DS_Store
+.AppleDouble
+.LSOverride
 
-# Node / React frontend
-react-frontend/node_modules/
-react-frontend/dist/
-react-frontend/.env
-react-frontend/.env.local
+# ═══════════════════════════════════════
+# Build Outputs
+# ═══════════════════════════════════════
+dist/
+build/
+*.egg-info/
+.eggs/
 
-# Spring Boot / Maven
-springboot-backend/target/
-springboot-backend/.mvn/
-springboot-backend/*.jar
-springboot-backend/*.log
-
-# Logs
-*.log
 
 # Temp files
 tmpclaude-*
