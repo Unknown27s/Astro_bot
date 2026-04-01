@@ -6,6 +6,8 @@ IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institu
 
 **Latest Version:** 2.0.0 | **Status:** Production-Ready | **License:** MIT
 
+> 📖 For a detailed breakdown of all technologies used and future improvement recommendations, see **[TECH_STACK.md](TECH_STACK.md)**.
+
 ---
 
 ## ✨ Key Features
