@@ -178,6 +178,45 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_doc_classification ON document_classifications(classification)
     """)
 
+    # ── Rate Limiting Configuration table (Admin controlled) ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limit_configs (
+            id TEXT PRIMARY KEY,
+            endpoint TEXT UNIQUE NOT NULL,
+            limit_requests INTEGER NOT NULL,
+            limit_window_seconds INTEGER NOT NULL,
+            enabled INTEGER DEFAULT 1,
+            description TEXT,
+            updated_by TEXT,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (updated_by) REFERENCES users(id)
+        )
+    """)
+
+    # ── Create index for rate limit lookups ──
+    cursor.execute("""
+        CREATE INDEX IF NOT EXISTS idx_rate_limit_endpoint ON rate_limit_configs(endpoint)
+    """)
+
+    # ── Insert default rate limits if table is empty ──
+    default_limits = [
+        ('auth', 5, 60, 'Login/Register - brute-force protection'),
+        ('chat', 5, 60, 'LLM queries - expensive operations'),
+        ('documents/upload', 10, 60, 'Document uploads - resource intensive'),
+        ('documents/tags', 30, 60, 'Tag management - moderate load'),
+        ('documents/read', 60, 60, 'Read operations - list tags, documents'),
+        ('documents/classify', 30, 60, 'Classification operations'),
+        ('global', 100, 60, 'Global rate limit - all requests'),
+    ]
+
+    existing_limits = cursor.execute("SELECT COUNT(*) as cnt FROM rate_limit_configs").fetchone()['cnt']
+    if existing_limits == 0:
+        for endpoint, limit_req, window, desc in default_limits:
+            cursor.execute(
+                "INSERT INTO rate_limit_configs (id, endpoint, limit_requests, limit_window_seconds, description, updated_at) VALUES (?,?,?,?,?,?)",
+                (str(uuid.uuid4()), endpoint, limit_req, window, desc, datetime.now().isoformat()),
+            )
+
     # ── Create default admin if not exists ──
     admin_exists = cursor.execute(
         "SELECT 1 FROM users WHERE username = ?", (ADMIN_USERNAME,)
@@ -325,6 +364,95 @@ def get_query_logs(limit: int = 100) -> list[dict]:
     logs = conn.execute("SELECT * FROM query_logs ORDER BY created_at DESC LIMIT ?", (limit,)).fetchall()
     conn.close()
     return [dict(l) for l in logs]
+
+
+# ── Preset Suggestion Questions ──
+PRESET_QUESTIONS = [
+    "What are the admission requirements?",
+    "What is the fee structure for this semester?",
+    "What are the hostel facilities available?",
+    "What is the exam schedule?",
+    "How to apply for scholarships?",
+    "What are the placement statistics?",
+    "What is the attendance policy?",
+    "What courses are offered in Computer Science?",
+    "What are the library timings?",
+    "How to get a bonafide certificate?",
+    "What is the anti-ragging policy?",
+    "What are the sports facilities available?",
+    "How to contact the student grievance cell?",
+    "What is the syllabus for current semester?",
+    "What are the rules for internal assessment?",
+]
+
+
+def get_preset_questions(prefix: str = "", limit: int = 5) -> list[str]:
+    """Get preset/common questions that match a prefix."""
+    if not prefix:
+        return PRESET_QUESTIONS[:limit]
+    prefix_lower = prefix.lower()
+    matching = [q for q in PRESET_QUESTIONS if prefix_lower in q.lower()]
+    return matching[:limit]
+
+
+def get_suggestions(query_prefix: str, user_id: str = None, limit: int = 5) -> dict:
+    """
+    Get autocomplete suggestions from query_logs.
+
+    Returns:
+        Dict with 'recent' (user's own), 'popular' (all users), and 'preset' lists.
+    """
+    conn = get_connection()
+    try:
+        recent = []
+        popular = []
+        seen = set()  # track seen queries for deduplication
+
+        if query_prefix and len(query_prefix) >= 2:
+            search_pattern = f"%{query_prefix}%"
+
+            # 1) User's recent queries
+            if user_id:
+                rows = conn.execute(
+                    """SELECT DISTINCT query_text FROM query_logs
+                       WHERE user_id = ? AND query_text LIKE ?
+                       ORDER BY created_at DESC LIMIT ?""",
+                    (user_id, search_pattern, limit),
+                ).fetchall()
+                for row in rows:
+                    q = row["query_text"]
+                    if q not in seen:
+                        recent.append(q)
+                        seen.add(q)
+
+            # 2) Popular queries across all users
+            rows = conn.execute(
+                """SELECT query_text, COUNT(*) as cnt FROM query_logs
+                   WHERE query_text LIKE ?
+                   GROUP BY query_text
+                   ORDER BY cnt DESC LIMIT ?""",
+                (search_pattern, limit + len(seen)),
+            ).fetchall()
+            for row in rows:
+                q = row["query_text"]
+                if q not in seen:
+                    popular.append(q)
+                    seen.add(q)
+                    if len(popular) >= limit:
+                        break
+
+        # 3) Preset questions (always included, filtered by prefix)
+        preset = get_preset_questions(query_prefix, limit)
+        # Remove presets already in recent/popular
+        preset = [q for q in preset if q not in seen]
+
+        return {
+            "recent": recent[:limit],
+            "popular": popular[:limit],
+            "preset": preset[:limit],
+        }
+    finally:
+        conn.close()
 
 
 def get_analytics() -> dict:
@@ -706,6 +834,98 @@ def filter_documents_by_tags(tag_ids: list[str]) -> list[dict]:
             ORDER BY d.uploaded_at DESC
         """, tag_ids + [len(tag_ids)]).fetchall()
         return [dict(d) for d in docs]
+    finally:
+        conn.close()
+
+
+# ═══════════════════════════════════════════
+# RATE LIMITING CONFIGURATION (Admin)
+# ═══════════════════════════════════════════
+
+def get_all_rate_limits() -> list[dict]:
+    """Get all rate limit configurations."""
+    conn = get_connection()
+    try:
+        limits = conn.execute("""
+            SELECT id, endpoint, limit_requests, limit_window_seconds, enabled, description, updated_by, updated_at
+            FROM rate_limit_configs
+            ORDER BY endpoint
+        """).fetchall()
+        return [dict(l) for l in limits]
+    finally:
+        conn.close()
+
+
+def get_rate_limit(endpoint: str) -> Optional[dict]:
+    """Get rate limit configuration for a specific endpoint."""
+    conn = get_connection()
+    try:
+        limit = conn.execute(
+            "SELECT id, endpoint, limit_requests, limit_window_seconds, enabled, description, updated_by, updated_at FROM rate_limit_configs WHERE endpoint = ?",
+            (endpoint,)
+        ).fetchone()
+        return dict(limit) if limit else None
+    finally:
+        conn.close()
+
+
+def update_rate_limit(endpoint: str, limit_requests: int, limit_window_seconds: int, enabled: bool = True, updated_by: str = None) -> bool:
+    """Update rate limit configuration for an endpoint."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE rate_limit_configs SET limit_requests = ?, limit_window_seconds = ?, enabled = ?, updated_by = ?, updated_at = ? WHERE endpoint = ?",
+            (limit_requests, limit_window_seconds, int(enabled), updated_by, datetime.now().isoformat(), endpoint)
+        )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
+    finally:
+        conn.close()
+
+
+def toggle_rate_limit(endpoint: str, enabled: bool, updated_by: str = None) -> bool:
+    """Enable/disable rate limiting for an endpoint."""
+    conn = get_connection()
+    try:
+        conn.execute(
+            "UPDATE rate_limit_configs SET enabled = ?, updated_by = ?, updated_at = ? WHERE endpoint = ?",
+            (int(enabled), updated_by, datetime.now().isoformat(), endpoint)
+        )
+        conn.commit()
+        return True
+    except Exception:
+        return False
+    finally:
+        conn.close()
+
+
+def reset_rate_limits_to_default() -> bool:
+    """Reset all rate limits to default values."""
+    conn = get_connection()
+    try:
+        default_limits = [
+            ('auth', 5, 60),
+            ('chat', 5, 60),
+            ('documents/upload', 10, 60),
+            ('documents/tags', 30, 60),
+            ('documents/read', 60, 60),
+            ('documents/classify', 30, 60),
+            ('global', 100, 60),
+        ]
+
+        for endpoint, limit_req, window in default_limits:
+            conn.execute(
+                "UPDATE rate_limit_configs SET limit_requests = ?, limit_window_seconds = ?, enabled = 1, updated_at = ? WHERE endpoint = ?",
+                (limit_req, window, datetime.now().isoformat(), endpoint)
+            )
+        conn.commit()
+        return True
+    except Exception:
+        conn.rollback()
+        return False
     finally:
         conn.close()
 

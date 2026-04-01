@@ -24,10 +24,33 @@ export default function DocumentsPage() {
     let success = 0;
     for (const file of files) {
       try {
-        await uploadDocument(file, user.id);
+        await uploadDocument(file, user?.id);
         success++;
-      } catch {
-        toast.error(`Failed: ${file.name}`);
+      } catch (err) {
+        // Extract error message with priority
+        let errorMsg = 'Upload failed';
+
+        if (err.response?.data?.detail) {
+          // Handle both string and array detail formats from Pydantic
+          const detail = err.response.data.detail;
+          if (typeof detail === 'string') {
+            errorMsg = detail;
+          } else if (Array.isArray(detail) && detail[0]?.msg) {
+            errorMsg = detail[0].msg;
+          }
+        } else if (err.response?.data?.error) {
+          errorMsg = err.response.data.error;
+        } else if (err.response?.status === 403) {
+          errorMsg = '❌ Only administrators can upload documents';
+        } else if (err.response?.status === 404) {
+          errorMsg = '❌ User not found';
+        } else if (err.response?.status === 413) {
+          errorMsg = '❌ File too large (max 50MB)';
+        } else if (err.response?.status === 422) {
+          errorMsg = '❌ PDF is password-protected or invalid format';
+        }
+
+        toast.error(`${file.name}: ${errorMsg}`);
       }
     }
     if (success) toast.success(`${success} file(s) uploaded & indexed`);

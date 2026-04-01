@@ -1,6 +1,6 @@
 # 📚 AstroBot v2.0 Documentation
 
-Welcome to the AstroBot documentation! This directory contains comprehensive guides for setup, implementation, deployment, and API usage.
+Welcome to the AstroBot documentation! This directory contains comprehensive guides for setup, development, and API usage.
 
 ---
 
@@ -20,36 +20,61 @@ Welcome to the AstroBot documentation! This directory contains comprehensive gui
 ---
 
 ### 🔧 [02 - Implementation Summary](./02-IMPLEMENTATION_SUMMARY.md)
-**Complete implementation details (300+ lines)**
-- Executive summary of all 4 phases
+**Complete implementation details**
+- Executive summary of features
 - Feature-by-feature breakdown:
   - **Phase 1**: Error Tracking & Structured Logging
   - **Phase 2**: Rate Limiting
   - **Phase 3**: Document Tagging/Classification
-  - **Phase 4**: Load Balancing
 - Files created and modified
 - Configuration options
-- Integration points
 - Testing checklist
-- Next steps & roadmap
 
 **Start here if you want to:** Understand what was implemented and how
 
 ---
 
-### 🚀 [03 - Load Balancing & Scaling](./03-LOAD_BALANCING.md)
-**Production deployment guide (300+ lines)**
-- Architecture diagrams
-- Docker setup instructions
-- Nginx configuration
-- Horizontal scaling guide
-- SSL/TLS setup
-- Monitoring & troubleshooting
-- Performance tuning
-- Backup & recovery procedures
-- Production checklist
+### 📡 [04 - API Endpoints](./04-API_ENDPOINTS.md)
+**Complete REST API reference**
+- Tag Management endpoints
+- Document Tagging endpoints
+- Classification endpoints
+- Search & Filtering
+- Rate Limits
+- Error Responses
 
-**Start here if you want to:** Deploy to production with multiple instances
+**Start here if you want to:** Integrate with the API
+
+---
+
+### ⏱️ [05 - Admin Rate Limiting](./05-ADMIN_RATE_LIMITING.md)
+**Rate limit configuration guide**
+- Per-endpoint rate limits
+- Admin configuration
+- Monitoring rate limits
+
+---
+
+### 🤝 [Contribution Guide](./contribution/CONTRIBUTING.md)
+**How to add new features yourself**
+- Architecture overview & data flow
+- Adding new API endpoints (Python → Spring Boot → React)
+- Adding new UI pages (React & Streamlit)
+- Adding new LLM providers
+- Adding new document parsers
+- Database changes
+- Testing checklist
+- Common patterns & troubleshooting
+
+Also see: [WORKFLOW.md](./contribution/WORKFLOW.md) - Quick checklist for feature development
+
+---
+
+### 📝 [Changelog](./CHANGELOG.md)
+**Version history and changes**
+- Bug fixes and improvements
+- Files created/modified/deleted
+- Project structure after cleanup
 
 ---
 
@@ -63,138 +88,85 @@ Welcome to the AstroBot documentation! This directory contains comprehensive gui
 
 ### 👨‍💻 I'm a Developer - Want to Understand Implementation
 **Follow this path:**
-1. Read: [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md) - 20 min
-2. Review: Code structure in project root
-3. Explore: API endpoints documentation
-4. Test: From [01-QUICKSTART.md](./01-QUICKSTART.md) "Test Key Features" section
-
-### 🚀 I'm DevOps - Want to Deploy to Production
-**Follow this path:**
-1. Read: [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md) - 30 min
-2. Run: Docker setup steps
-3. Configure: SSL certificates
-4. Monitor: Follow production checklist
+1. Read: [START_HERE.md](./START_HERE.md) - Quick overview
+2. Read: [COPILOT_GUIDE.md](./COPILOT_GUIDE.md) - Development workflow
+3. Review: [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md)
+4. Explore: [04-API_ENDPOINTS.md](./04-API_ENDPOINTS.md)
 
 ---
 
-## 📊 Quick Reference
+## 📁 Documentation Structure
 
-### 4 Phases Implemented
-
-| Phase | Feature | Status | 
-|-------|---------|--------|
-| 1 | Error Tracking & Logging | ✅ Complete |
-| 2 | Rate Limiting | ✅ Complete |
-| 3 | Document Tagging/Classification | ✅ Complete |
-| 4 | Load Balancing | ✅ Complete |
-
-### Dependencies Added
 ```
-sentry-sdk              # Error tracking
-python-json-logger      # JSON logging  
-slowapi                 # Rate limiting
-redis                   # Distributed rate limiting (optional)
-prometheus-client       # Metrics (optional)
-alembic                 # Database migrations
-pyyaml                  # Config management
-```
-
----
-
-## 🚀 Getting Started
-
-### Step 1: Install Dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### Step 2: Verify Installation
-```bash
-# Linux/Mac
-./verify.sh
-
-# Windows
-verify.bat
-```
-
-### Step 3: Configure .env
-```bash
-# Create .env file with your settings
-SENTRY_DSN=
-SENTRY_ENVIRONMENT=development
-LOG_LEVEL=INFO
-```
-
-### Step 4: Run API Server
-```bash
-python api_server.py
-```
-
-### Step 5: Test
-```bash
-curl http://localhost:8000/api/health
+docs/
+├── 01-QUICKSTART.md          # Getting started guide
+├── 02-IMPLEMENTATION_SUMMARY.md  # Implementation details
+├── 04-API_ENDPOINTS.md       # REST API reference
+├── 05-ADMIN_RATE_LIMITING.md # Rate limiting config
+├── COPILOT_GUIDE.md          # AI agent/developer workflow
+├── START_HERE.md             # Quick project overview
+├── INDEX.md                  # Documentation index
+├── README.md                 # This file
+│
+├── architecture/
+│   ├── COMPLETE_UNDERSTANDING.md  # Full system docs
+│   └── DATABASE_SCHEMA.md         # Database structure
+│
+├── development/
+│   └── DEVELOPMENT_GUIDE.md       # Development workflow
+│
+├── guides/
+│   ├── QUICKREF.md               # Quick reference commands
+│   ├── QUICKSTART.md             # Setup guide
+│   └── TROUBLESHOOTING.md        # Common issues & fixes
+│
+├── contribution/
+│   ├── CONTRIBUTING.md           # How to add new features
+│   └── WORKFLOW.md               # Quick development checklist
+│
+└── CHANGELOG.md                  # Version history
 ```
 
 ---
 
-## 📁 Documentation Files
+## 🔑 Key Features
 
-- **README.md** (this file) - Documentation index and navigation
-- **01-QUICKSTART.md** - Quick start guide (5 min to running)
-- **02-IMPLEMENTATION_SUMMARY.md** - Full implementation details
-- **03-LOAD_BALANCING.md** - Production deployment & scaling
-
----
-
-## 🔑 Key Features at a Glance
-
-✅ **Error Tracking** - Sentry integration for production monitoring
-✅ **Structured Logging** - JSON logs with request tracing
+✅ **RAG Pipeline** - Retrieval-Augmented Generation for document Q&A  
+✅ **Error Tracking** - Sentry integration for monitoring  
+✅ **Structured Logging** - JSON logs with request tracing  
 ✅ **Rate Limiting** - Per-user and endpoint-specific limits  
-✅ **Document Tagging** - Flexible multi-tag system
-✅ **Document Classification** - Semantic document organization
-✅ **Advanced Search** - Filter by tags and classification
-✅ **Load Balancing** - Nginx + multi-instance deployment
-✅ **Auto-Failover** - Health checks with automatic recovery
-✅ **Horizontal Scaling** - Add instances easily
+✅ **Document Tagging** - Flexible multi-tag system  
+✅ **Document Classification** - Semantic document organization  
+✅ **Advanced Search** - Filter by tags and classification  
+✅ **Multi-Provider LLM** - Ollama, Grok, Gemini with fallback  
 
 ---
 
-## 🚨 Troubleshooting Quick Links
+## 📊 Architecture Overview
 
-**Missing dependencies?** 
-→ Run: `pip install -r requirements.txt`
-
-**Port already in use?**
-→ See: [01-QUICKSTART.md](./01-QUICKSTART.md#step-4-run-locally) 
-
-**Verify script failing?**
-→ See: [01-QUICKSTART.md](./01-QUICKSTART.md#troubleshooting)
-
-**Deployment questions?**
-→ See: [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md#troubleshooting)
+```
+React Frontend (3000) → Spring Boot (8080) → Python FastAPI (8001)
+                                                    ↓
+                                            ┌──────┴──────┐
+                                            │             │
+                                        ChromaDB      SQLite
+                                        (vectors)    (relational)
+```
 
 ---
 
-## 📞 Documentation Roadmap
+## 🚨 Quick Troubleshooting
 
-| Document | Purpose | Read Time |
-|----------|---------|-----------|
-| [01-QUICKSTART.md](./01-QUICKSTART.md) | Quick setup & basic testing | 5 min |
-| [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md) | Implementation details | 20 min |
-| [03-LOAD_BALANCING.md](./03-LOAD_BALANCING.md) | Production deployment | 30 min |
+| Issue | Solution |
+|-------|----------|
+| Missing dependencies | `pip install -r requirements.txt` |
+| Port already in use | Check if another service is running |
+| LLM not responding | Ensure Ollama is running: `ollama serve` |
+| ChromaDB errors | Delete `data/chroma_db/`, re-upload docs |
+
+See [guides/TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) for more.
 
 ---
 
-**Status:** ✅ Production Ready (92%)  
 **Last Updated:** March 2026  
 **Version:** 2.0.0
-
----
-
-## Next Steps
-
-1. **Now:** Read [01-QUICKSTART.md](./01-QUICKSTART.md)
-2. **Today:** Get the app running locally
-3. **This week:** Test features and configure settings
-4. **This month:** Deploy to production with load balancing

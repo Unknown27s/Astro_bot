@@ -205,6 +205,67 @@ app.add_middleware(
 
 ## Data Issues
 
+### Issue: PDF upload fails in Streamlit with error message
+
+**Common Errors & Solutions:**
+
+| Error | Cause | Solution |
+|-------|-------|----------|
+| "Parse failed for X: ..." | PDF malformed, encrypted, or no extractable text | Use a clean PDF with searchable text (not scans) |
+| "No chunks generated from X" | Document too short (< 500 characters) | Ensure document has sufficient content |
+| "Database error for X" | SQLite write failed or disk full | Check disk space, restart server |
+| "Failed to index X in vector database" | ChromaDB error or corruption | Delete `data/chroma_db/`, restart, re-upload |
+| "File too large (50.5MB). Max: 50MB" | Exceeds 50MB size limit | Split document into smaller files |
+
+**Manual Troubleshooting:**
+
+```python
+# Test the upload pipeline step-by-step
+from pathlib import Path
+from ingestion.parser import parse_document
+from ingestion.chunker import chunk_document
+from ingestion.embedder import store_chunks
+
+# Step 1: Test parsing
+file_path = "path/to/test.pdf"
+text, error = parse_document(file_path)
+if not text:
+    print(f"❌ Parse failed: {error}")
+else:
+    print(f"✅ Parsed {len(text)} characters")
+
+# Step 2: Test chunking
+chunks = chunk_document(text, source_name="test.pdf")
+if not chunks:
+    print("❌ No chunks generated (text too short?)")
+else:
+    print(f"✅ Generated {len(chunks)} chunks")
+
+# Step 3: Test embedding/storage
+try:
+    stored = store_chunks(chunks, "test_doc_id")
+    print(f"✅ Stored {stored} chunks in ChromaDB")
+except Exception as e:
+    print(f"❌ ChromaDB error: {e}")
+```
+
+**Prevention Tips:**
+- ✅ Use clean PDFs with **searchable text** (not image scans)
+- ✅ Keep files **under 50MB**
+- ✅ Ensure document has **minimum 500 characters**
+- ✅ Supported formats: `.pdf`, `.docx`, `.txt`, `.xlsx`, `.csv`, `.pptx`, `.html`
+- ✅ Check file permissions and disk space
+
+**Recent Fix:** The Streamlit upload handler now:
+- ✅ Properly unpacks parse results (fixed silent failures)
+- ✅ Shows detailed error messages for each failure step
+- ✅ Validates file size before processing
+- ✅ Handles database and ChromaDB errors gracefully
+- ✅ Cleans up partial uploads on failure
+- ✅ Counts/displays successful vs failed uploads
+
+---
+
 ### Issue: Documents not searchable after upload
 
 **Cause:** Document failed to parse or chunk

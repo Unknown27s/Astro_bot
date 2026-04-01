@@ -5,6 +5,11 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Separate axios instance for file uploads (without default JSON header)
+const fileApi = axios.create({
+  baseURL: '/api',
+});
+
 // ── Auth ──
 export const login = (username, password) =>
   api.post('/auth/login', { username, password });
@@ -18,14 +23,17 @@ export const sendChat = (query, userId, username) =>
 
 export const getChatStatus = () => api.get('/chat/status');
 
+// ── Suggestions / Autocomplete ──
+export const getSuggestions = (query, userId) =>
+  api.get('/suggestions', { params: { q: query, user_id: userId } });
+
 // ── Documents ──
 export const uploadDocument = (file, uploadedBy) => {
   const formData = new FormData();
   formData.append('file', file);
   formData.append('uploaded_by', uploadedBy);
-  return api.post('/documents/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  // Use fileApi instance which doesn't have Content-Type: application/json header
+  return fileApi.post('/documents/upload', formData);
 };
 
 export const listDocuments = () => api.get('/documents');
@@ -73,5 +81,16 @@ export const deleteMemoryEntry = (memoryId) =>
 export const runMemoryCleanup = () => api.post('/memory/cleanup');
 
 export const clearAllMemory = () => api.post('/memory/clear');
+
+// ── Rate Limiting (Admin) ──
+export const getRateLimits = () => api.get('/admin/rate-limits');
+
+export const updateRateLimit = (endpoint, limitRequests, limitWindowSeconds, enabled = true) =>
+  api.put(`/admin/rate-limits/${endpoint}`, { limit_requests: limitRequests, limit_window_seconds: limitWindowSeconds, enabled });
+
+export const toggleRateLimit = (endpoint, enabled) =>
+  api.patch(`/admin/rate-limits/${endpoint}/toggle`, { enabled });
+
+export const resetRateLimits = () => api.post('/admin/rate-limits/reset');
 
 export default api;

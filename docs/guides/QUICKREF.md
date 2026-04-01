@@ -192,11 +192,44 @@ conn.close()
 
 ## 🔗 API Endpoints
 
+### Document Upload (Admin Only)
+
+**Endpoint:** `POST /api/documents/upload`
+
+**Required Parameters:**
+- `file` (FormData, required): PDF/DOCX/TXT file
+- `uploaded_by` (FormData, required): Admin user ID
+
+**Response:** 200 OK
+```json
+{
+  "doc_id": "doc-123",
+  "filename": "course_handbook.pdf",
+  "chunks_indexed": 45,
+  "file_size": 1024000
+}
+```
+
+**Error Responses:**
+- `400`: Missing `uploaded_by` or unsupported file type
+- `403`: User is not an admin (❌ Only administrators can upload documents)
+- `404`: User not found
+- `413`: File too large (max 50MB)
+- `422`: PDF is password-protected or parsing failed
+
+**cURL Example:**
+```bash
+curl -X POST http://localhost:8000/api/documents/upload \
+  -F "file=@document.pdf" \
+  -F "uploaded_by=admin-user-id"
+```
+
+### Other Endpoints
+
 ```
 POST /api/login
 POST /api/register
 POST /api/chat
-POST /api/documents/upload
 GET /api/documents
 POST /api/admin/users
 GET /api/admin/analytics

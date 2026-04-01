@@ -15,7 +15,8 @@ import java.util.Map;
 
 /**
  * Service that proxies all calls to the Python FastAPI RAG server.
- * Spring Boot acts as an API gateway; Python handles RAG, LLM, embeddings, and DB.
+ * Spring Boot acts as an API gateway; Python handles RAG, LLM, embeddings, and
+ * DB.
  */
 @Service
 public class PythonApiService {
@@ -33,7 +34,8 @@ public class PythonApiService {
                 .uri("/api/auth/login")
                 .bodyValue(Map.of("username", username, "password", password))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -42,7 +44,8 @@ public class PythonApiService {
                 .uri("/api/auth/register")
                 .bodyValue(Map.of("username", username, "password", password, "role", role, "full_name", fullName))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -53,7 +56,8 @@ public class PythonApiService {
                 .uri("/api/chat")
                 .bodyValue(Map.of("query", query, "user_id", userId, "username", username))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -61,7 +65,28 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/chat/status")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    // ── Suggestions ──
+
+    public Map<String, Object> getSuggestions(String query, String userId) {
+        return client.get()
+                .uri(uriBuilder -> {
+                    uriBuilder.path("/api/suggestions");
+                    if (query != null && !query.isEmpty()) {
+                        uriBuilder.queryParam("q", query);
+                    }
+                    if (userId != null && !userId.isEmpty()) {
+                        uriBuilder.queryParam("user_id", userId);
+                    }
+                    return uriBuilder.build();
+                })
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -70,14 +95,17 @@ public class PythonApiService {
     public Map<String, Object> uploadDocument(MultipartFile file, String uploadedBy) {
         MultipartBodyBuilder builder = new MultipartBodyBuilder();
         builder.part("file", file.getResource());
-        builder.part("uploaded_by", uploadedBy);
+        if (uploadedBy != null && !uploadedBy.isEmpty()) {
+            builder.part("uploaded_by", uploadedBy);
+        }
 
         return client.post()
                 .uri("/api/documents/upload")
                 .contentType(MediaType.MULTIPART_FORM_DATA)
                 .body(BodyInserters.fromMultipartData(builder.build()))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -85,7 +113,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/documents")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
                 .block();
     }
 
@@ -93,7 +122,8 @@ public class PythonApiService {
         return client.delete()
                 .uri("/api/documents/{docId}", docId)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -103,7 +133,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/users")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
                 .block();
     }
 
@@ -112,7 +143,8 @@ public class PythonApiService {
                 .uri("/api/users")
                 .bodyValue(Map.of("username", username, "password", password, "role", role, "full_name", fullName))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -121,7 +153,8 @@ public class PythonApiService {
                 .uri("/api/users/{userId}/toggle", userId)
                 .bodyValue(Map.of("is_active", isActive))
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -129,7 +162,8 @@ public class PythonApiService {
         return client.delete()
                 .uri("/api/users/{userId}", userId)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -139,7 +173,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/analytics")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -147,7 +182,8 @@ public class PythonApiService {
         return client.get()
                 .uri(uriBuilder -> uriBuilder.path("/api/analytics/logs").queryParam("limit", limit).build())
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {})
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
                 .block();
     }
 
@@ -157,7 +193,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/health")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -165,7 +202,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/health/providers")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -175,7 +213,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/settings")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -184,7 +223,8 @@ public class PythonApiService {
                 .uri("/api/settings")
                 .bodyValue(settings)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -192,15 +232,58 @@ public class PythonApiService {
         return client.post()
                 .uri("/api/settings/test-provider/{provider}", provider)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
     public Map<String, Object> getKnowledgeBaseStats() {
         return client.get()
-                .uri("/api/knowledge-base/stats")
+                .uri("/api/documents/stats")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    // ── Rate Limiting (Admin) ──
+
+    public Map<String, Object> getRateLimits() {
+        return client.get()
+                .uri("/api/admin/rate-limits")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> updateRateLimit(String endpoint, Map<String, Object> body) {
+        return client.put()
+                .uri("/api/admin/rate-limits/{endpoint}", endpoint)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> toggleRateLimit(String endpoint, Map<String, Object> body) {
+        return client.patch()
+                .uri("/api/admin/rate-limits/{endpoint}/toggle", endpoint)
+                .bodyValue(body)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> resetRateLimits() {
+        return client.post()
+                .uri("/api/admin/rate-limits/reset")
+                .bodyValue(Map.of())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -210,7 +293,8 @@ public class PythonApiService {
         return client.get()
                 .uri("/api/memory/stats")
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -218,7 +302,8 @@ public class PythonApiService {
         return client.delete()
                 .uri("/api/memory/{memoryId}", memoryId)
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -227,7 +312,8 @@ public class PythonApiService {
                 .uri("/api/memory/cleanup")
                 .bodyValue(Map.of())
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 
@@ -236,8 +322,8 @@ public class PythonApiService {
                 .uri("/api/memory/clear")
                 .bodyValue(Map.of())
                 .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
                 .block();
     }
 }
-

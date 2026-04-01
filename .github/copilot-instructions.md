@@ -572,6 +572,26 @@ print(statuses)  # Provider health + LLM mode
 
 ## 🤖 For AI Agent Use
 
+## Mandatory Change Approval Rules
+
+These rules are mandatory for all coding tasks in this workspace:
+
+1. Ask before any feature changes
+  - Do not add, remove, or alter product features until the user explicitly approves the change.
+  - If a request is unclear, ask a clarification question before making edits.
+
+2. Preserve API behavior unless approved
+  - Do not remove API endpoints, request paths, request payload fields, response fields, or related integration logic without explicit user approval.
+  - Non-breaking API additions are allowed, but any breaking API change must be explained before implementation.
+
+3. Explain planned edits before implementation
+  - Before editing code, provide a short pre-change summary of what will be modified and why.
+  - Include affected files and expected behavior changes.
+
+4. No silent breaking changes
+  - Do not make silent or implicit breaking changes to public interfaces.
+  - Call out compatibility risks before making the change.
+
 When working with this codebase:
 
 1. **Always check `.env` configuration first** — Understand LLM mode, provider settings

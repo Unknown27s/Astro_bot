@@ -1,12 +1,13 @@
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { FileText, BarChart3, Users, Settings, Activity, MessageSquare, LogOut, Database } from 'lucide-react';
+import { FileText, BarChart3, Users, Settings, Activity, MessageSquare, LogOut, Database, Zap } from 'lucide-react';
 
 const navItems = [
   { to: '/admin/documents', icon: FileText, label: 'Documents' },
   { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/settings', icon: Settings, label: 'AI Settings' },
+  { to: '/admin/rate-limiting', icon: Zap, label: 'Rate Limiting' },
   { to: '/admin/memory', icon: Database, label: 'Memory' },
   { to: '/admin/health', icon: Activity, label: 'Health' },
   { to: '/admin/chat', icon: MessageSquare, label: 'Test Chat' },
