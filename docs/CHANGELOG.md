@@ -4,6 +4,19 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.1.0] - 2026-04-03
+
+### ✨ New Features
+
+#### Voice-to-Text (Microphone Input)
+- **`rag/voice_to_text.py`**: Added local OpenAI Whisper inference using `faster-whisper`. Base model is lazy-loaded and cached in memory.
+- **`api_server.py`**: Added `/api/chat/audio` endpoint to accept webm blobs and route them through Whisper then into the standard RAG pipeline.
+- **`springboot-backend/src/main/java/com/astrobot/controller/ChatController.java` & `PythonApiService.java`**: Added `/audio` POST route that proxies `multipart/form-data` natively with Spring WebClient.
+- **`react-frontend/src/pages/ChatPage.jsx`**: Added a Microphone button that uses Web Audio API (`MediaRecorder`) to capture mic data, manage recording states, and dispatch voice queries.
+- **Requirements**: Added `faster-whisper` to `requirements.txt` and `ffmpeg` system dependency.
+
+---
+
 ## [2.0.3] - 2026-04-01
 
 ### 🐛 Bug Fixes

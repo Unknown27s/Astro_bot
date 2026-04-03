@@ -21,6 +21,14 @@ export const register = (username, password, role, fullName) =>
 export const sendChat = (query, userId, username) =>
   api.post('/chat', { query, userId, username });
 
+export const sendAudioMessage = (audioBlob, userId, username) => {
+  const formData = new FormData();
+  formData.append('audio', audioBlob, 'audio.webm');
+  formData.append('user_id', userId);
+  formData.append('username', username);
+  return fileApi.post('/chat/audio', formData);
+};
+
 export const getChatStatus = () => api.get('/chat/status');
 
 // ── Suggestions / Autocomplete ──

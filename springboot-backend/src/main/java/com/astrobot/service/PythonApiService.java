@@ -61,6 +61,22 @@ public class PythonApiService {
                 .block();
     }
 
+    public Map<String, Object> chatAudio(MultipartFile audio, String userId, String username) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("audio", audio.getResource());
+        builder.part("user_id", userId);
+        builder.part("username", username);
+
+        return client.post()
+                .uri("/api/chat/audio")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(builder.build()))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
     public Map<String, Object> getChatStatus() {
         return client.get()
                 .uri("/api/chat/status")

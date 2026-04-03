@@ -450,6 +450,7 @@ def test_full_rag_pipeline():
 | Issue | Debug Steps | Fix |
 |-------|------------|-----|
 | **"LLM provider unavailable"** | Check if Ollama running: `curl http://localhost:11434/api/tags` | Start Ollama or switch provider |
+| **Voice/Audio chat failures (FastAPI)** | Look for `ffmpeg` errors in python traceback | Verify `ffmpeg` is installed on host system and added to PATH |
 | **ChromaDB search returns nothing** | Verify embeddings: `from ingestion.embedder import get_collection; print(get_collection().count())` | Re-upload document |
 | **Slow responses (>2 seconds)** | Check `response_time_ms` in logs, profile LLM vs search | Switch to faster model |
 | **SQL error "database is locked"** | Check concurrent writes | Use WAL mode: `PRAGMA journal_mode=WAL` |
@@ -503,7 +504,7 @@ logging.basicConfig(level=logging.DEBUG)  # Shows all debug messages
 ❏ Code review completed
 ❏ Tests pass locally
 ❏ No hardcoded secrets in code
-❏ Dependencies documented in requirements.txt
+❏ Dependencies documented in requirements.txt (including OS-level dependencies like FFmpeg)
 ❏ Database migrations tested
 ❏ Backup created
 ❏ Rollback plan documented

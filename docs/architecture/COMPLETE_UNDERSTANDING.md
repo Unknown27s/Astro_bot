@@ -428,6 +428,17 @@ Step 3: Return answer
 - **Cloud-only**: Grok or Gemini (fast, needs API key)
 - **Hybrid**: Try local first, fallback to cloud
 
+### Whisper Transcription (`rag/voice_to_text.py`)
+
+**Job:** Convert user's spoken voice (audio files) into plain text string.
+
+**How it works:**
+- Triggered when users use the microphone button in React and `/api/chat/audio` is called.
+- Uses `faster-whisper` (running locally on CPU) with the `base.en` model for optimal speed-to-accuracy ratio.
+- The model object is kept actively in Python memory using `@lru_cache` so sequential voice messages transcribe in < 1s.
+- Securely processes browser-native `.webm` audio using the system-level `ffmpeg` multimedia framwork.
+- Output text is seamlessly injected right into the standard `rag/retriever.py` and query flow.
+
 ### Provider Manager (`rag/providers/manager.py`)
 
 **Job:** Route LLM calls through fallback chain
@@ -484,9 +495,12 @@ FINAL STATE: System can now answer questions about CS101!
 ### Query Flow
 
 ```
-┌─ User types "When is midterm?"
+┌─ User types "When is midterm?" (or Speaks using Microphone)
 │
-├─ [EMBED QUERY] Convert to vector
+├─ [TRANSCRIBE] (Optional) Convert audio webm blob to text using Whisper
+│  └─ Result: Text string
+│
+├─ [EMBED QUERY] Convert text to vector
 │  └─ Result: [0.15, -0.42, ...]
 │
 ├─ [SEARCH CHROMADB] Find similar chunks

@@ -164,6 +164,7 @@ class ChatResponse(BaseModel):
     sources: list[dict]
     citations: str
     response_time_ms: float
+    transcribed_text: Optional[str] = None
 
 class CreateUserRequest(BaseModel):
     username: str
@@ -293,6 +294,78 @@ def api_chat(req: ChatRequest, request: Request):
         sources=chunks,
         citations=citations,
         response_time_ms=round(elapsed_ms, 1),
+    )
+
+
+@app.post("/api/chat/audio", response_model=ChatResponse)
+@limiter.limit("5/minute")
+def api_chat_audio(
+    request: Request,
+    audio: UploadFile = File(...),
+    user_id: str = Form(...),
+    username: str = Form(...)
+):
+    """Receive audio, transcribe to text, and process through RAG pipeline."""
+    from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
+    from rag.generator import generate_response
+    import shutil
+    from rag.voice_to_text import transcribe_audio
+
+    start_time = time.time()
+    
+    file_ext = Path(audio.filename).suffix.lower()
+    if not file_ext:
+        file_ext = ".webm" # Default from browser
+        
+    safe_name = f"audio_{int(time.time())}{file_ext}"
+    file_path = UPLOAD_DIR / safe_name
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(audio.file, buffer)
+        
+    transcribed_text, error = transcribe_audio(str(file_path))
+    
+    try:
+        os.remove(file_path)
+    except Exception as e:
+        logger.warning(f"Could not delete temp audio file: {e}")
+        
+    if error or not transcribed_text:
+        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {error}")
+        
+    logger.info(f"User {username} spoke: {transcribed_text}")
+    
+    # Generate RAG response based on transcribed text
+    chunks = retrieve_context(transcribed_text)
+    context = format_context_for_llm(chunks)
+    
+    gen_result = generate_response(transcribed_text, context, user_id=user_id, sources=[c.get("source", "") for c in chunks])
+    
+    response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+    citations = get_source_citations(chunks)
+    elapsed_ms = (time.time() - start_time) * 1000
+    
+    try:
+        source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
+        log_response_text = f"[🗣️ VOICE] {response_text}" 
+        
+        log_query(
+            user_id=user_id,
+            username=username,
+            query_text=f"[VOICE] {transcribed_text}",
+            response_text=log_response_text[:500],
+            sources=source_names,
+            response_time_ms=elapsed_ms,
+        )
+    except Exception as e:
+        logger.error(f"Error logging audio query: {str(e)}", exc_info=True)
+
+    return ChatResponse(
+        response=response_text,
+        sources=chunks,
+        citations=citations,
+        response_time_ms=round(elapsed_ms, 1),
+        transcribed_text=transcribed_text
     )
 
 

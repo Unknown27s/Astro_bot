@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sendChat, getChatStatus, getSuggestions } from '../services/api';
-import { Send, LogOut, Trash2, Clock, TrendingUp, Sparkles } from 'lucide-react';
+import { sendChat, getChatStatus, getSuggestions, sendAudioMessage } from '../services/api';
+import { Send, LogOut, Trash2, Clock, TrendingUp, Sparkles, Mic } from 'lucide-react';
 
 export default function ChatPage() {
   const { user, logout } = useAuth();
@@ -12,6 +12,11 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [llmOnline, setLlmOnline] = useState(null);
   const bottomRef = useRef(null);
+
+  // ── Audio Recording State ──
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
 
   // ── Autocomplete state ──
   const [suggestions, setSuggestions] = useState({ recent: [], popular: [], preset: [] });
@@ -105,6 +110,78 @@ export default function ChatPage() {
       }]);
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Failed to get a response. Please try again.' }]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      
+      mediaRecorderRef.current.ondataavailable = (e) => {
+        if (e.data.size > 0) audioChunksRef.current.push(e.data);
+      };
+      
+      mediaRecorderRef.current.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        audioChunksRef.current = [];
+        handleSendAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+      
+      audioChunksRef.current = [];
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      alert("Microphone access denied. Please allow microphone permissions.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      await startRecording();
+    }
+  };
+
+  const handleSendAudio = async (audioBlob) => {
+    if (loading) return;
+    setMessages(prev => [...prev, { role: 'user', content: '🎤 [Processing Voice Message...]' }]);
+    setLoading(true);
+    try {
+      const { data } = await sendAudioMessage(audioBlob, user.id, user.username);
+      
+      if (data.transcribed_text) {
+        setMessages(prev => {
+           const newMsgs = [...prev];
+           newMsgs[newMsgs.length - 1].content = `🎤 ${data.transcribed_text}`;
+           return newMsgs;
+        });
+      }
+
+      setMessages(prev => [...prev, {
+        role: 'assistant',
+        content: data.response,
+        citations: data.citations,
+        time: data.response_time_ms,
+      }]);
+    } catch (err) {
+      setMessages(prev => {
+         const newMsgs = [...prev];
+         newMsgs[newMsgs.length - 1].content = '🎤 [Voice message failed]';
+         return [...newMsgs, { role: 'assistant', content: '⚠️ Failed to process audio. Please try again.' }];
+      });
     } finally {
       setLoading(false);
     }
@@ -288,11 +365,20 @@ export default function ChatPage() {
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             onFocus={handleInputFocus}
-            placeholder="Ask a question about institutional documents..."
-            disabled={loading}
+            placeholder={isRecording ? "Listening..." : "Ask a question about institutional documents..."}
+            disabled={loading || isRecording}
             autoComplete="off"
           />
-          <button className="btn btn-primary" onClick={() => handleSend()} disabled={loading || !input.trim()}>
+          <button 
+            className={`btn ${isRecording ? 'btn-danger' : 'btn-outline'}`} 
+            onClick={toggleRecording} 
+            disabled={loading} 
+            title={isRecording ? "Stop recording" : "Record voice message"}
+            style={{ padding: '0 12px' }}
+          >
+            <Mic size={18} className={isRecording ? "animate-pulse" : ""} />
+          </button>
+          <button className="btn btn-primary" onClick={() => handleSend()} disabled={loading || !input.trim() || isRecording}>
             <Send size={18} />
           </button>
         </div>
