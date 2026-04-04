@@ -86,6 +86,17 @@ public class PythonApiService {
                 .block();
     }
 
+    // ── Announcements ──
+
+    public List<Map<String, Object>> getAnnouncements(int limit) {
+        return client.get()
+                .uri(uriBuilder -> uriBuilder.path("/api/announcements").queryParam("limit", limit).build())
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
+                .block();
+    }
+
     // ── Suggestions ──
 
     public Map<String, Object> getSuggestions(String query, String userId) {

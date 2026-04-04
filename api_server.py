@@ -52,7 +52,7 @@ from database.db import (
     store_memory, delete_memory, cleanup_expired_memory, invalidate_memory_by_source,
     get_memory_stats, clear_all_memory,
     get_all_rate_limits, get_rate_limit, update_rate_limit, toggle_rate_limit, reset_rate_limits_to_default,
-    get_suggestions,
+    get_suggestions, create_announcement, get_recent_announcements,
 )
 from config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
@@ -228,6 +228,11 @@ def api_register(req: RegisterRequest, request: Request):
 # CHAT / RAG ENDPOINTS
 # ═══════════════════════════════════════════════════════
 
+@app.get("/api/announcements")
+def api_list_announcements(limit: int = 50):
+    """Get the recent announcements feed."""
+    return get_recent_announcements(limit)
+
 @app.post("/api/chat", response_model=ChatResponse)
 @limiter.limit("5/minute")  # Expensive LLM operation - strict limit
 def api_chat(req: ChatRequest, request: Request):
@@ -236,6 +241,35 @@ def api_chat(req: ChatRequest, request: Request):
     from rag.generator import generate_response
 
     start_time = time.time()
+
+    # --- Announcement Feature Intercept ---
+    if req.query.strip().lower().startswith("@announcement"):
+        from database.db import get_connection
+        conn = get_connection()
+        user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
+        conn.close()
+        
+        if not user_row or user_row['role'] not in ('admin', 'faculty'):
+            raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
+            
+        # Bypass RAG, just use LLM to format
+        prompt = f"You are an institutional announcer. Please format the following raw text into a professional, clear, and engaging announcement with suitable emojis. Do not add conversational filler, just output the announcement text.\n\nRaw text: {req.query[13:].strip()}"
+        
+        gen_result = generate_response(prompt, context="", user_id=req.user_id)
+        formatted_announcement = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+        
+        if not formatted_announcement:
+            formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
+            
+        create_announcement(req.user_id, req.username, formatted_announcement)
+        
+        elapsed_ms = (time.time() - start_time) * 1000
+        return ChatResponse(
+            response="✅ Announcement generated and posted successfully!\n\n---\n\n" + formatted_announcement,
+            sources=[],
+            citations="",
+            response_time_ms=round(elapsed_ms, 1)
+        )
 
     # Step 1: Retrieve relevant chunks
     chunks = retrieve_context(req.query)

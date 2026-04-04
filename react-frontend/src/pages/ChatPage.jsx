@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sendChat, getChatStatus, getSuggestions, sendAudioMessage } from '../services/api';
-import { Send, LogOut, Trash2, Clock, TrendingUp, Sparkles, Mic } from 'lucide-react';
+import { sendChat, getChatStatus, getSuggestions, sendAudioMessage, getAnnouncements } from '../services/api';
+import { Send, LogOut, Trash2, Clock, TrendingUp, Sparkles, Mic, Bell, MessageSquare, Megaphone, Pin, ChevronRight, X, AtSign } from 'lucide-react';
 
 export default function ChatPage() {
   const { user, logout } = useAuth();
@@ -11,6 +11,10 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [llmOnline, setLlmOnline] = useState(null);
+  const [announcements, setAnnouncements] = useState([]);
+  const [unreadAnnouncements, setUnreadAnnouncements] = useState(0);
+  const [activeView, setActiveView] = useState('chat'); // 'chat' or 'announcements'
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const bottomRef = useRef(null);
 
   // ── Audio Recording State ──
@@ -26,9 +30,53 @@ export default function ChatPage() {
   const suggestionsRef = useRef(null);
   const inputRef = useRef(null);
 
+  // ── @ Command state ──
+  const [showAtCommands, setShowAtCommands] = useState(false);
+  const [atCommandIndex, setAtCommandIndex] = useState(-1);
+  const atCommandsRef = useRef(null);
+
+  const AT_COMMANDS = [
+    { cmd: '@Announcement', description: 'Post an institutional announcement', icon: '📢' },
+  ];
+
+  const isAdmin = user?.role === 'admin';
+  const isFaculty = user?.role === 'faculty';
+  const canPost = isAdmin || isFaculty;
+
   useEffect(() => {
     getChatStatus().then(r => setLlmOnline(r.data.available)).catch(() => setLlmOnline(false));
   }, []);
+
+  useEffect(() => {
+    const fetchAnnouncements = async () => {
+      try {
+        const { data } = await getAnnouncements();
+        setAnnouncements(data);
+        const lastSeen = localStorage.getItem(`lastSeenAnnouncement_${user?.id}`);
+        if (data.length > 0) {
+          const newIndex = data.findIndex(a => a.id === lastSeen);
+          if (newIndex === -1 && lastSeen) {
+            setUnreadAnnouncements(data.length);
+          } else if (newIndex > 0) {
+            setUnreadAnnouncements(newIndex);
+          } else if (!lastSeen) {
+            setUnreadAnnouncements(data.length);
+          }
+        }
+      } catch (err) {}
+    };
+    fetchAnnouncements();
+    const interval = setInterval(fetchAnnouncements, 30000);
+    return () => clearInterval(interval);
+  }, [user?.id]);
+
+  const handleSwitchToAnnouncements = () => {
+    setActiveView('announcements');
+    if (announcements.length > 0) {
+      setUnreadAnnouncements(0);
+      localStorage.setItem(`lastSeenAnnouncement_${user?.id}`, announcements[0].id);
+    }
+  };
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -54,7 +102,6 @@ export default function ChatPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
     if (!query || query.trim().length < 2) {
-      // Show presets even when input is short/empty (on focus)
       if (query.trim().length === 0) {
         getSuggestions('', user?.id)
           .then(({ data }) => {
@@ -92,12 +139,14 @@ export default function ChatPage() {
     inputRef.current?.focus();
   }, []);
 
-  // Handle sending (also usable from suggestion click)
+  // Handle sending
   const handleSend = async (overrideQuery) => {
     const query = (overrideQuery || input).trim();
     if (!query || loading) return;
     setInput('');
     setShowSuggestions(false);
+    // Switch to chat view when sending a message
+    setActiveView('chat');
     setMessages(prev => [...prev, { role: 'user', content: query }]);
     setLoading(true);
     try {
@@ -108,6 +157,13 @@ export default function ChatPage() {
         citations: data.citations,
         time: data.response_time_ms,
       }]);
+      // If it was an announcement, refresh the announcements list
+      if (query.trim().toLowerCase().startsWith('@announcement')) {
+        try {
+          const annResult = await getAnnouncements();
+          setAnnouncements(annResult.data);
+        } catch {}
+      }
     } catch {
       setMessages(prev => [...prev, { role: 'assistant', content: '⚠️ Failed to get a response. Please try again.' }]);
     } finally {
@@ -157,6 +213,7 @@ export default function ChatPage() {
 
   const handleSendAudio = async (audioBlob) => {
     if (loading) return;
+    setActiveView('chat');
     setMessages(prev => [...prev, { role: 'user', content: '🎤 [Processing Voice Message...]' }]);
     setLoading(true);
     try {
@@ -187,8 +244,38 @@ export default function ChatPage() {
     }
   };
 
-  // Keyboard navigation for suggestions
+  // Keyboard navigation for suggestions & @ commands
   const handleKeyDown = (e) => {
+    // Handle @ command navigation
+    if (showAtCommands) {
+      const filteredCmds = canPost
+        ? AT_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(input.trim().toLowerCase()))
+        : [];
+
+      if (e.key === 'Escape') {
+        setShowAtCommands(false);
+        setAtCommandIndex(-1);
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setAtCommandIndex(prev => (prev < filteredCmds.length - 1 ? prev + 1 : 0));
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        setAtCommandIndex(prev => (prev > 0 ? prev - 1 : filteredCmds.length - 1));
+        return;
+      }
+      if (e.key === 'Enter' || e.key === 'Tab') {
+        e.preventDefault();
+        if (atCommandIndex >= 0 && atCommandIndex < filteredCmds.length) {
+          selectAtCommand(filteredCmds[atCommandIndex].cmd);
+        }
+        return;
+      }
+    }
+
     const items = allSuggestions();
 
     if (e.key === 'Escape') {
@@ -221,11 +308,38 @@ export default function ChatPage() {
   const handleInputChange = (e) => {
     const val = e.target.value;
     setInput(val);
+
+    // @ command detection for admin/faculty
+    if (canPost && val.trim() === '@') {
+      setShowAtCommands(true);
+      setAtCommandIndex(0);
+      setShowSuggestions(false);
+      return;
+    }
+    if (canPost && val.trim().startsWith('@') && val.trim().length > 1 && !val.trim().includes(' ')) {
+      // Filter commands as they type
+      const query = val.trim().toLowerCase();
+      const matches = AT_COMMANDS.filter(c => c.cmd.toLowerCase().startsWith(query));
+      if (matches.length > 0) {
+        setShowAtCommands(true);
+        setAtCommandIndex(0);
+        setShowSuggestions(false);
+        return;
+      }
+    }
+    setShowAtCommands(false);
+    setAtCommandIndex(-1);
     fetchSuggestions(val);
   };
 
+  const selectAtCommand = (cmd) => {
+    setInput(cmd + ' ');
+    setShowAtCommands(false);
+    setAtCommandIndex(-1);
+    inputRef.current?.focus();
+  };
+
   const handleInputFocus = () => {
-    // Show suggestions on focus (presets when empty, search when has text)
     fetchSuggestions(input);
   };
 
@@ -296,92 +410,265 @@ export default function ChatPage() {
   const popularStartIdx = suggestions.recent.length;
   const presetStartIdx = suggestions.recent.length + suggestions.popular.length;
 
+  const latestAnnouncement = announcements.length > 0 ? announcements[0] : null;
+
   return (
-    <div className="chat-container">
-      {/* Header */}
-      <div className="flex items-center justify-between" style={{ padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div className="flex items-center gap-2">
-          <h3>💬 Chat with AstroBot</h3>
-          <span className="text-sm text-muted">({user?.username})</span>
+    <div className="chatpage-layout">
+      {/* ── Left Sidebar ── */}
+      <div className={`chatpage-sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
+        <div className="chatpage-sidebar-header">
+          <div className="chatpage-sidebar-brand">
+            <span style={{ fontSize: 22 }}>🤖</span>
+            {!sidebarCollapsed && <span className="chatpage-sidebar-title">AstroBot</span>}
+          </div>
+          <button
+            className="chatpage-sidebar-toggle"
+            onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+            title={sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+          >
+            <ChevronRight size={16} style={{ transform: sidebarCollapsed ? 'rotate(0deg)' : 'rotate(180deg)', transition: 'transform 0.2s' }} />
+          </button>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`badge ${llmOnline ? 'badge-ok' : 'badge-warning'}`}>
-            {llmOnline ? '🟢 LLM Online' : '🟡 Fallback'}
-          </span>
-          <button className="btn btn-ghost btn-sm" onClick={() => setMessages([])}><Trash2 size={14} /> Clear</button>
+
+        <nav className="chatpage-sidebar-nav">
+          {/* Chat Button */}
+          <button
+            className={`chatpage-sidebar-link ${activeView === 'chat' ? 'active' : ''}`}
+            onClick={() => setActiveView('chat')}
+          >
+            <MessageSquare size={18} />
+            {!sidebarCollapsed && <span>Chat</span>}
+          </button>
+
+          {/* Announcements Button */}
+          <button
+            className={`chatpage-sidebar-link ${activeView === 'announcements' ? 'active' : ''}`}
+            onClick={handleSwitchToAnnouncements}
+            style={{ position: 'relative' }}
+          >
+            <Megaphone size={18} />
+            {!sidebarCollapsed && <span>Announcements</span>}
+            {unreadAnnouncements > 0 && (
+              <span className="chatpage-unread-badge">
+                {unreadAnnouncements}
+              </span>
+            )}
+          </button>
+        </nav>
+
+        <div className="chatpage-sidebar-footer">
+          <div className="chatpage-sidebar-user">
+            <div className="chatpage-sidebar-avatar">
+              {user?.username?.charAt(0)?.toUpperCase() || '?'}
+            </div>
+            {!sidebarCollapsed && (
+              <div className="chatpage-sidebar-userinfo">
+                <span className="chatpage-sidebar-username">{user?.username}</span>
+                <span className="chatpage-sidebar-role">{user?.role}</span>
+              </div>
+            )}
+          </div>
           {isStandalone && (
-            <button className="btn btn-ghost btn-sm" onClick={handleLogout}><LogOut size={14} /> Logout</button>
+            <button
+              className="chatpage-sidebar-link"
+              onClick={handleLogout}
+              style={{ marginTop: 8 }}
+            >
+              <LogOut size={18} />
+              {!sidebarCollapsed && <span>Logout</span>}
+            </button>
           )}
         </div>
       </div>
 
-      {/* Messages */}
-      <div className="chat-messages">
-        {messages.length === 0 && (
-          <div className="text-center text-muted" style={{ marginTop: '20vh' }}>
-            <p style={{ fontSize: 48 }}>🤖</p>
-            <h3>Welcome to IMS AstroBot</h3>
-            <p className="text-sm" style={{ marginTop: 8 }}>Ask me anything about institutional documents</p>
-            <p className="text-sm text-muted" style={{ marginTop: 4 }}>💡 Start typing to see suggested questions</p>
-          </div>
-        )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`chat-message ${msg.role}`}>
-            <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
-            {msg.citations && (
-              <details style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-                <summary>📚 Sources</summary>
-                <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{msg.citations}</div>
-              </details>
-            )}
-            {msg.time && (
-              <div className="text-sm text-muted" style={{ marginTop: 4 }}>{msg.time.toFixed(0)}ms</div>
+      {/* ── Main Content Area ── */}
+      <div className="chatpage-main">
+        {/* Header Bar */}
+        <div className="chatpage-header">
+          <div className="flex items-center gap-2">
+            {activeView === 'chat' ? (
+              <>
+                <MessageSquare size={18} />
+                <h3 style={{ margin: 0 }}>Chat with AstroBot</h3>
+              </>
+            ) : (
+              <>
+                <Megaphone size={18} />
+                <h3 style={{ margin: 0 }}>Announcements</h3>
+              </>
             )}
           </div>
-        ))}
-        {loading && (
-          <div className="chat-message assistant">
-            <span className="spinner" /> Searching documents and generating response...
+          <div className="flex items-center gap-2">
+            <span className={`badge ${llmOnline ? 'badge-ok' : 'badge-warning'}`}>
+              {llmOnline ? '🟢 Online' : '🟡 Fallback'}
+            </span>
+            {activeView === 'chat' && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setMessages([])}><Trash2 size={14} /> Clear</button>
+            )}
           </div>
-        )}
-        <div ref={bottomRef} />
-      </div>
-
-      {/* Input with Autocomplete */}
-      <div className="autocomplete-wrapper">
-        {/* Suggestions dropdown (renders ABOVE the input) */}
-        {showSuggestions && allSuggestions().length > 0 && (
-          <div className="autocomplete-dropdown" ref={suggestionsRef}>
-            {renderSection('Recent', <Clock size={12} />, suggestions.recent, 'recent', recentStartIdx)}
-            {renderSection('Popular', <TrendingUp size={12} />, suggestions.popular, 'popular', popularStartIdx)}
-            {renderSection('Suggested', <Sparkles size={12} />, suggestions.preset, 'preset', presetStartIdx)}
-          </div>
-        )}
-
-        <div className="chat-input-bar">
-          <input
-            ref={inputRef}
-            value={input}
-            onChange={handleInputChange}
-            onKeyDown={handleKeyDown}
-            onFocus={handleInputFocus}
-            placeholder={isRecording ? "Listening..." : "Ask a question about institutional documents..."}
-            disabled={loading || isRecording}
-            autoComplete="off"
-          />
-          <button 
-            className={`btn ${isRecording ? 'btn-danger' : 'btn-outline'}`} 
-            onClick={toggleRecording} 
-            disabled={loading} 
-            title={isRecording ? "Stop recording" : "Record voice message"}
-            style={{ padding: '0 12px' }}
-          >
-            <Mic size={18} className={isRecording ? "animate-pulse" : ""} />
-          </button>
-          <button className="btn btn-primary" onClick={() => handleSend()} disabled={loading || !input.trim() || isRecording}>
-            <Send size={18} />
-          </button>
         </div>
+
+        {/* ── Chat View ── */}
+        {activeView === 'chat' && (
+          <>
+            {/* Pinned Announcement Banner */}
+            {latestAnnouncement && (
+              <div className="chatpage-pinned-banner" onClick={handleSwitchToAnnouncements}>
+                <div className="chatpage-pinned-icon"><Pin size={14} /></div>
+                <div className="chatpage-pinned-content">
+                  <span className="chatpage-pinned-label">📢 Latest Announcement</span>
+                  <span className="chatpage-pinned-text">
+                    {latestAnnouncement.content.length > 120
+                      ? latestAnnouncement.content.substring(0, 120) + '...'
+                      : latestAnnouncement.content}
+                  </span>
+                </div>
+                <ChevronRight size={16} className="text-muted" />
+              </div>
+            )}
+
+            {/* Messages */}
+            <div className="chat-messages">
+              {messages.length === 0 && (
+                <div className="text-center text-muted" style={{ marginTop: '20vh' }}>
+                  <p style={{ fontSize: 48 }}>🤖</p>
+                  <h3>Welcome to IMS AstroBot</h3>
+                  <p className="text-sm" style={{ marginTop: 8 }}>Ask me anything about institutional documents</p>
+                  <p className="text-sm text-muted" style={{ marginTop: 4 }}>💡 Start typing to see suggested questions</p>
+                  {canPost && (
+                    <p className="text-sm" style={{ marginTop: 12, color: 'var(--primary)' }}>
+                      💡 Type <code style={{ background: 'var(--bg-input)', padding: '2px 6px', borderRadius: 4 }}>@Announcement your message</code> to post an announcement
+                    </p>
+                  )}
+                </div>
+              )}
+              {messages.map((msg, i) => (
+                <div key={i} className={`chat-message ${msg.role}`}>
+                  <div style={{ whiteSpace: 'pre-wrap' }}>{msg.content}</div>
+                  {msg.citations && (
+                    <details style={{ marginTop: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+                      <summary>📚 Sources</summary>
+                      <div style={{ marginTop: 4, whiteSpace: 'pre-wrap' }}>{msg.citations}</div>
+                    </details>
+                  )}
+                  {msg.time && (
+                    <div className="text-sm text-muted" style={{ marginTop: 4 }}>{msg.time.toFixed(0)}ms</div>
+                  )}
+                </div>
+              ))}
+              {loading && (
+                <div className="chat-message assistant">
+                  <span className="spinner" /> Searching documents and generating response...
+                </div>
+              )}
+              <div ref={bottomRef} />
+            </div>
+
+            {/* Input with Autocomplete */}
+            <div className="autocomplete-wrapper">
+              {/* @ Command Suggestions (Admin/Faculty only) */}
+              {showAtCommands && canPost && (
+                <div className="autocomplete-dropdown at-commands-dropdown" ref={atCommandsRef}>
+                  <div className="autocomplete-section">
+                    <AtSign size={12} /> Commands
+                  </div>
+                  {AT_COMMANDS
+                    .filter(c => c.cmd.toLowerCase().startsWith(input.trim().toLowerCase()))
+                    .map((cmd, i) => (
+                    <div
+                      key={cmd.cmd}
+                      className={`autocomplete-item at-command-item ${i === atCommandIndex ? 'active' : ''}`}
+                      onMouseEnter={() => setAtCommandIndex(i)}
+                      onMouseDown={(e) => { e.preventDefault(); selectAtCommand(cmd.cmd); }}
+                    >
+                      <span style={{ fontSize: 18, marginRight: 8 }}>{cmd.icon}</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 600, color: 'var(--primary)' }}>{cmd.cmd}</div>
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>{cmd.description}</div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Regular Suggestions */}
+              {!showAtCommands && showSuggestions && allSuggestions().length > 0 && (
+                <div className="autocomplete-dropdown" ref={suggestionsRef}>
+                  {renderSection('Recent', <Clock size={12} />, suggestions.recent, 'recent', recentStartIdx)}
+                  {renderSection('Popular', <TrendingUp size={12} />, suggestions.popular, 'popular', popularStartIdx)}
+                  {renderSection('Suggested', <Sparkles size={12} />, suggestions.preset, 'preset', presetStartIdx)}
+                </div>
+              )}
+
+              <div className="chat-input-bar">
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={handleInputChange}
+                  onKeyDown={handleKeyDown}
+                  onFocus={handleInputFocus}
+                  placeholder={isRecording ? "Listening..." : (canPost ? "Ask a question or type @Announcement..." : "Ask a question about institutional documents...")}
+                  disabled={loading || isRecording}
+                  autoComplete="off"
+                />
+                <button 
+                  className={`btn ${isRecording ? 'btn-danger' : 'btn-outline'}`} 
+                  onClick={toggleRecording} 
+                  disabled={loading} 
+                  title={isRecording ? "Stop recording" : "Record voice message"}
+                  style={{ padding: '0 12px' }}
+                >
+                  <Mic size={18} className={isRecording ? "animate-pulse" : ""} />
+                </button>
+                <button className="btn btn-primary" onClick={() => handleSend()} disabled={loading || !input.trim() || isRecording}>
+                  <Send size={18} />
+                </button>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Announcements View ── */}
+        {activeView === 'announcements' && (
+          <div className="chatpage-announcements-view">
+            {announcements.length === 0 ? (
+              <div className="text-center text-muted" style={{ marginTop: '20vh' }}>
+                <Megaphone size={48} style={{ opacity: 0.3, marginBottom: 16 }} />
+                <h3>No Announcements Yet</h3>
+                <p className="text-sm" style={{ marginTop: 8 }}>
+                  {canPost
+                    ? 'Type @Announcement in chat to create the first one!'
+                    : 'Check back later for institutional updates.'}
+                </p>
+              </div>
+            ) : (
+              <div className="chatpage-announcements-list">
+                {announcements.map((ann, idx) => (
+                  <div key={ann.id} className={`chatpage-announcement-card ${idx === 0 ? 'latest' : ''}`}>
+                    <div className="chatpage-announcement-header">
+                      <div className="chatpage-announcement-avatar">
+                        {ann.author_name?.charAt(0)?.toUpperCase() || '?'}
+                      </div>
+                      <div className="chatpage-announcement-meta">
+                        <strong>{ann.author_name}</strong>
+                        <span className="text-muted text-sm">
+                          {new Date(ann.created_at).toLocaleDateString('en-US', {
+                            month: 'short', day: 'numeric', year: 'numeric',
+                            hour: '2-digit', minute: '2-digit'
+                          })}
+                        </span>
+                      </div>
+                      {idx === 0 && <span className="chatpage-announcement-latest-badge">Latest</span>}
+                    </div>
+                    <div className="chatpage-announcement-body">
+                      {ann.content}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -4,6 +4,34 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.2.0] - 2026-04-04
+
+### ✨ New Features
+
+#### AI-Powered Discord-Style Announcements
+A fully integrated, role-gated announcement system — resembling Discord's announcements channel — that lets Faculty and Admins post institutional updates directly from the chat interface using an `@Announcement` trigger command. The AI automatically formats the raw message into a professional, emoji-enhanced broadcast.
+
+**Backend (Python FastAPI)**
+- **`database/db.py`**: Added `announcements` table to SQLite schema (`id`, `user_id`, `author_name`, `content`, `created_at`). Added `create_announcement()` and `get_recent_announcements()` helper functions.
+- **`api_server.py`**: Added `GET /api/announcements` endpoint to retrieve the announcements feed. Modified `api_chat()` to intercept queries starting with `@Announcement`, verify the user's role (Admin/Faculty only), bypass the RAG pipeline, and pass the text directly to the LLM with a formatting system prompt. The formatted result is persisted to DB and a success preview is returned in chat.
+
+**Backend (Spring Boot Gateway)**
+- **`AnnouncementController.java`** *(new)*: Exposes `GET /api/announcements` as a proxy to the Python service.
+- **`PythonApiService.java`**: Added `getAnnouncements(int limit)` method via WebClient.
+
+**Frontend (React)**
+- **`services/api.js`**: Added `getAnnouncements()` API call.
+- **`pages/ChatPage.jsx`**:
+  - Auto-fetches announcements on load and polls every **30 seconds** for live updates.
+  - Tracks unread count per user in `localStorage`; shows a red notification badge on the `📢 Announcements` header button.
+  - Clicking the button slides open a Discord-style right-side panel listing all announcements with author name, date, and formatted content.
+  - `@Announcement` autocomplete is **not shown to students** — role-gated at the UI level.
+
+**Documentation**
+- **`docs/development/announcements_proposal.md`** *(new)*: Full feature proposal document archived.
+
+---
+
 ## [2.1.0] - 2026-04-03
 
 ### ✨ New Features

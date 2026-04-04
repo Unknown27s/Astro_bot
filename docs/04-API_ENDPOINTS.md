@@ -1,7 +1,7 @@
-# AstroBot v2.0 API Endpoints Reference
+# AstroBot v2.2 API Endpoints Reference
 
-**Last Updated:** March 2026
-**Total New Endpoints:** 13
+**Last Updated:** April 2026
+**Total Endpoints:** 16
 **Rate Limiting:** Enabled on all endpoints
 
 ---
@@ -12,9 +12,10 @@
 2. [Document Tagging](#document-tagging)
 3. [Classification](#classification)
 4. [Search & Filtering](#search--filtering)
-5. [Rate Limits](#rate-limits)
-6. [Error Responses](#error-responses)
-7. [Examples](#examples)
+5. [Announcements](#announcements)
+6. [Rate Limits](#rate-limits)
+7. [Error Responses](#error-responses)
+8. [Examples](#examples)
 
 ---
 
@@ -438,6 +439,74 @@ curl "http://localhost:8000/api/documents/search?limit=10&offset=20" | jq
 ```bash
 curl http://localhost:8000/api/documents | jq
 ```
+
+---
+
+## Announcements
+
+> **Role Access:** `GET` is public (all authenticated users). Posting is via the `/api/chat` endpoint with the `@Announcement` prefix — Admin and Faculty roles only.
+
+### Get Announcements Feed
+
+**Endpoint:** `GET /api/announcements`
+
+**Access:** All authenticated users (Students, Faculty, Admin)
+
+**Query Parameters:**
+- `limit` (integer, optional, default=50): Max number of announcements to return (newest first)
+
+**Response:** `200 OK`
+```json
+[
+  {
+    "id": "uuid-1234",
+    "user_id": "user-uuid",
+    "author_name": "Dr. Smith",
+    "content": "📢 **Important Notice**\n\nThe campus library will be closed this Friday...",
+    "created_at": "2026-04-04T14:30:00"
+  }
+]
+```
+
+**cURL Example:**
+```bash
+curl http://localhost:8000/api/announcements | jq
+```
+
+### Post an Announcement (via Chat)
+
+**Endpoint:** `POST /api/chat`
+
+**Access:** Admin and Faculty only (returns HTTP 403 for students)
+
+**How it works:** Send a regular chat request with the query starting with `@Announcement`. The AI will automatically format the message and save it to the announcements feed.
+
+**Request:**
+```json
+{
+  "query": "@Announcement Tomorrow is a public holiday. All classes are cancelled.",
+  "user_id": "admin-uuid",
+  "username": "dr.smith"
+}
+```
+
+**Response:** `200 OK`
+```json
+{
+  "response": "✅ Announcement generated and posted successfully!\n\n---\n\n📢 **Important Notice**\n\nWe wish to inform all students that...",
+  "sources": [],
+  "citations": "",
+  "response_time_ms": 1320.5
+}
+```
+
+**Error — Student attempts to post:**
+```json
+{
+  "detail": "Only faculty and admins can post announcements"
+}
+```
+*HTTP 403 Forbidden*
 
 ---
 

@@ -12,16 +12,16 @@ from log_config import get_logger
 
 logger = get_logger(__name__)
 
-# Use base.en for fast inference. This is automatically downloaded from HuggingFace on first use.
-MODEL_SIZE = "base.en"
+# We use local folder directly instead of huggingface cache
+MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "models", "whisper-base-en")
 
 # We use lru_cache to keep the model loaded in memory for faster subsequent inferences.
 @lru_cache(maxsize=1)
 def get_whisper_model() -> WhisperModel:
-    logger.info(f"Loading Whisper model: {MODEL_SIZE}")
+    logger.info(f"Loading Whisper model from local path: {MODEL_DIR}")
     # Run on CPU with int8 quantization for balance of speed/memory on typical backend servers.
     # If the system has a GPU with CUDA, this could be changed to device="cuda", compute_type="float16"
-    return WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+    return WhisperModel(MODEL_DIR, device="cpu", compute_type="int8", local_files_only=True)
 
 def transcribe_audio(file_path: str) -> Tuple[Optional[str], Optional[str]]:
     """

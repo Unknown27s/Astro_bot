@@ -10,8 +10,6 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 .mypy_cache/
-dist/
-build/
 
 # ═══════════════════════════════════════
 # Runtime Data (Local Only)
@@ -23,11 +21,12 @@ data/
 .env.*.local
 
 # ═══════════════════════════════════════
-# Model Files (Too Large)
+# Model Files (Too Large for GitHub)
 # ═══════════════════════════════════════
 models/*.gguf
 models/*.bin
 models/*.pth
+models/whisper-base-en/
 
 # ═══════════════════════════════════════
 # Node / NPM / React
@@ -54,7 +53,6 @@ target/
 springboot-backend/target/
 springboot-backend/.mvn/
 **/.mvn/wrapper/
-*.log
 .classpath
 .project
 .settings/
@@ -87,6 +85,45 @@ build/
 *.egg-info/
 .eggs/
 
+# ═══════════════════════════════════════
+# Logs
+# ═══════════════════════════════════════
+logs/
+*.log
+hs_err_pid*.log
 
-# Temp files
+# ═══════════════════════════════════════
+# AI / Whisper Model Cache
+# ═══════════════════════════════════════
+whisper-base-en/
+faster_whisper/
+whisper_cache/
+~/.cache/huggingface/
+# Whisper model downloads (faster-whisper / huggingface cache)
+models/whisper*/
+models/Systran/
+faster-whisper-*/
+ggml-*.bin
+
+# ═══════════════════════════════════════
+# Gemini / Antigravity Local Data
+# ═══════════════════════════════════════
+.gemini/
+.antigravityignore
+
+# ═══════════════════════════════════════
+# Database (Runtime)
+# ═══════════════════════════════════════
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ═══════════════════════════════════════
+# Temp / Debug / Test Files
+# ═══════════════════════════════════════
 tmpclaude-*
+debug_*.py
+test_output.txt
+verify_output.txt
+pip_list.txt

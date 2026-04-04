@@ -31,6 +31,9 @@ export const sendAudioMessage = (audioBlob, userId, username) => {
 
 export const getChatStatus = () => api.get('/chat/status');
 
+// ── Announcements ──
+export const getAnnouncements = (limit = 50) => api.get('/announcements', { params: { limit } });
+
 // ── Suggestions / Autocomplete ──
 export const getSuggestions = (query, userId) =>
   api.get('/suggestions', { params: { q: query, user_id: userId } });

@@ -235,6 +235,18 @@ def init_db():
             ),
         )
 
+    # ── Announcements table ──
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS announcements (
+            id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            author_name TEXT NOT NULL,
+            content TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -929,6 +941,36 @@ def reset_rate_limits_to_default() -> bool:
     finally:
         conn.close()
 
+
+# ═══════════════════════════════════════════
+# ANNOUNCEMENTS
+# ═══════════════════════════════════════════
+
+def create_announcement(user_id: str, author_name: str, content: str) -> str:
+    """Create a new global announcement."""
+    announcement_id = str(uuid.uuid4())
+    conn = get_connection()
+    try:
+        conn.execute(
+            "INSERT INTO announcements (id, user_id, author_name, content, created_at) VALUES (?, ?, ?, ?, ?)",
+            (announcement_id, user_id, author_name, content, datetime.now().isoformat())
+        )
+        conn.commit()
+        return announcement_id
+    finally:
+        conn.close()
+
+def get_recent_announcements(limit: int = 50) -> list[dict]:
+    """Get the most recent announcements."""
+    conn = get_connection()
+    try:
+        announcements = conn.execute(
+            "SELECT * FROM announcements ORDER BY created_at DESC LIMIT ?",
+            (limit,)
+        ).fetchall()
+        return [dict(a) for a in announcements]
+    finally:
+        conn.close()
 
 # Initialize on import
 init_db()
