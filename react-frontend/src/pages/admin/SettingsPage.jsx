@@ -32,6 +32,7 @@ export default function SettingsPage() {
     if (form.gemini_model !== settings.gemini_model) payload.gemini_model = form.gemini_model;
     if (form.temperature !== settings.temperature) payload.temperature = form.temperature;
     if (form.max_tokens !== settings.max_tokens) payload.max_tokens = form.max_tokens;
+    if (form.system_prompt !== settings.system_prompt) payload.system_prompt = form.system_prompt;
 
     if (!Object.keys(payload).length) return toast('No changes to save');
     try {
@@ -211,6 +212,31 @@ export default function SettingsPage() {
             <input type="range" min="64" max="4096" step="64" value={form.max_tokens || 512}
               onChange={e => update('max_tokens', parseInt(e.target.value))} style={{ padding: 0 }} />
           </div>
+        </div>
+      </div>
+
+      {/* System Prompt */}
+      <div className="card" style={{ marginBottom: 16 }}>
+        <div className="flex items-center justify-between" style={{ marginBottom: 12 }}>
+          <h3>💬 System Prompt</h3>
+          <button className="btn btn-ghost btn-sm" onClick={() => update('system_prompt',
+            `You are IMS AstroBot, a helpful and accurate academic assistant for an institutional management system. \nYou answer questions based ONLY on the provided institutional documents and context.\nIf the context does not contain enough information to answer the question, say so clearly.\nDo not make up information. Always be concise, professional, and helpful.\nIf citing specific regulations or policies, mention the source document when possible.`
+          )}>
+            🔄 Reset to Default
+          </button>
+        </div>
+        <p className="text-sm text-muted" style={{ marginBottom: 8 }}>
+          This prompt is sent to the LLM with every query. It controls the AI's tone, behavior, and boundaries.
+        </p>
+        <textarea
+          value={form.system_prompt || ''}
+          onChange={e => update('system_prompt', e.target.value)}
+          rows={6}
+          style={{ width: '100%', resize: 'vertical', fontFamily: 'monospace', fontSize: 13, padding: 12, borderRadius: 8, border: '1px solid var(--border)', background: 'var(--bg-input)', color: 'var(--text)' }}
+          placeholder="Enter system prompt for the AI assistant..."
+        />
+        <div className="text-sm text-muted" style={{ marginTop: 4, textAlign: 'right' }}>
+          {(form.system_prompt || '').length} characters
         </div>
       </div>
 

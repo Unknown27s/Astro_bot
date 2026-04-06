@@ -34,6 +34,9 @@ export const getChatStatus = () => api.get('/chat/status');
 // ── Announcements ──
 export const getAnnouncements = (limit = 50) => api.get('/announcements', { params: { limit } });
 
+export const deleteAnnouncement = (id, userId, userRole) =>
+  api.delete(`/announcements/${id}`, { headers: { 'X-User-ID': userId, 'X-User-Role': userRole } });
+
 // ── Suggestions / Autocomplete ──
 export const getSuggestions = (query, userId) =>
   api.get('/suggestions', { params: { q: query, user_id: userId } });

@@ -29,4 +29,18 @@ public class AnnouncementController {
                     .body(Map.of("error", "Failed to get announcements: " + e.getMessage()));
         }
     }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteAnnouncement(
+            @PathVariable String id,
+            @RequestHeader(value = "X-User-ID", defaultValue = "") String userId,
+            @RequestHeader(value = "X-User-Role", defaultValue = "") String userRole) {
+        try {
+            Map<String, Object> result = pythonApi.deleteAnnouncement(id, userId, userRole);
+            return ResponseEntity.ok(result);
+        } catch (WebClientResponseException e) {
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("error", "Failed to delete announcement: " + e.getMessage()));
+        }
+    }
 }

@@ -191,6 +191,7 @@ class ProviderSettingsRequest(BaseModel):
     gemini_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    system_prompt: Optional[str] = None
 
 
 # ═══════════════════════════════════════════════════════
@@ -233,6 +234,25 @@ def api_list_announcements(limit: int = 50):
     """Get the recent announcements feed."""
     return get_recent_announcements(limit)
 
+
+@app.delete("/api/announcements/{announcement_id}")
+def api_delete_announcement(announcement_id: str, request: Request):
+    """Delete an announcement. Admins can delete any; authors can delete their own."""
+    from database.db import delete_announcement
+    
+    user_id = request.headers.get("X-User-ID", "")
+    user_role = request.headers.get("X-User-Role", "")
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID required")
+    
+    success = delete_announcement(announcement_id, user_id, user_role)
+    if not success:
+        raise HTTPException(status_code=404, detail="Announcement not found or you don't have permission to delete it")
+    
+    logger.info(f"Announcement {announcement_id} deleted by user {user_id}")
+    return {"message": "Announcement deleted", "id": announcement_id}
+
 @app.post("/api/chat", response_model=ChatResponse)
 @limiter.limit("5/minute")  # Expensive LLM operation - strict limit
 def api_chat(req: ChatRequest, request: Request):
@@ -252,11 +272,25 @@ def api_chat(req: ChatRequest, request: Request):
         if not user_row or user_row['role'] not in ('admin', 'faculty'):
             raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
             
-        # Bypass RAG, just use LLM to format
-        prompt = f"You are an institutional announcer. Please format the following raw text into a professional, clear, and engaging announcement with suitable emojis. Do not add conversational filler, just output the announcement text.\n\nRaw text: {req.query[13:].strip()}"
+        # Bypass RAG AND memory cache — call LLM directly so each announcement is unique
+        from rag.providers.manager import get_manager
+        from config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
         
-        gen_result = generate_response(prompt, context="", user_id=req.user_id)
-        formatted_announcement = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+        raw_text = req.query[13:].strip()
+        announcement_prompt = (
+            "You are an institutional announcer. Please format the following raw text "
+            "into a professional, clear, and engaging announcement with suitable emojis. "
+            "Do not add conversational filler, just output the announcement text.\n\n"
+            f"Raw text: {raw_text}"
+        )
+        
+        mgr = get_manager()
+        formatted_announcement = mgr.generate(
+            system_prompt=SYSTEM_PROMPT,
+            user_message=announcement_prompt,
+            temperature=MODEL_TEMPERATURE,
+            max_tokens=MODEL_MAX_TOKENS,
+        )
         
         if not formatted_announcement:
             formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
@@ -955,6 +989,7 @@ def api_update_settings(req: ProviderSettingsRequest):
         "gemini_model": "GEMINI_MODEL",
         "temperature": "MODEL_TEMPERATURE",
         "max_tokens": "MODEL_MAX_TOKENS",
+        "system_prompt": "SYSTEM_PROMPT",
     }
 
     updated = []

@@ -1,8 +1,9 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { sendChat, getChatStatus, getSuggestions, sendAudioMessage, getAnnouncements } from '../services/api';
+import { sendChat, getChatStatus, getSuggestions, sendAudioMessage, getAnnouncements, deleteAnnouncement } from '../services/api';
 import { Send, LogOut, Trash2, Clock, TrendingUp, Sparkles, Mic, Bell, MessageSquare, Megaphone, Pin, ChevronRight, X, AtSign } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 export default function ChatPage() {
   const { user, logout } = useAuth();
@@ -69,6 +70,20 @@ export default function ChatPage() {
     const interval = setInterval(fetchAnnouncements, 30000);
     return () => clearInterval(interval);
   }, [user?.id]);
+
+  const handleDeleteAnnouncement = async (id) => {
+    if (!window.confirm("Are you sure you want to delete this announcement?")) return;
+    
+    try {
+      await deleteAnnouncement(id, user.id, user.role);
+      toast.success("Announcement deleted successfully");
+      const { data } = await getAnnouncements();
+      setAnnouncements(data);
+    } catch (error) {
+      toast.error("Failed to delete announcement");
+      console.error(error);
+    }
+  };
 
   const handleSwitchToAnnouncements = () => {
     setActiveView('announcements');
@@ -658,7 +673,19 @@ export default function ChatPage() {
                           })}
                         </span>
                       </div>
-                      {idx === 0 && <span className="chatpage-announcement-latest-badge">Latest</span>}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {idx === 0 && <span className="chatpage-announcement-latest-badge">Latest</span>}
+                        {(isAdmin || user?.id === ann.user_id) && (
+                          <button 
+                            className="btn btn-ghost btn-sm" 
+                            style={{ padding: '4px', color: 'var(--error)' }}
+                            onClick={() => handleDeleteAnnouncement(ann.id)}
+                            title="Delete Announcement"
+                          >
+                            <Trash2 size={16} />
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="chatpage-announcement-body">
                       {ann.content}

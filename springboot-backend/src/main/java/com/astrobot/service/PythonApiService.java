@@ -97,6 +97,17 @@ public class PythonApiService {
                 .block();
     }
 
+    public Map<String, Object> deleteAnnouncement(String announcementId, String userId, String userRole) {
+        return client.delete()
+                .uri("/api/announcements/{id}", announcementId)
+                .header("X-User-ID", userId)
+                .header("X-User-Role", userRole)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
     // ── Suggestions ──
 
     public Map<String, Object> getSuggestions(String query, String userId) {

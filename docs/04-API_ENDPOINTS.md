@@ -510,6 +510,34 @@ curl http://localhost:8000/api/announcements | jq
 
 ---
 
+### Delete Announcement
+
+**Endpoint:** `DELETE /api/announcements/{id}`
+
+**Rate Limit:** 30 requests/minute (using general write endpoint limits)
+
+**Headers:**
+- `X-User-ID` (string, required): The ID of the requesting user.
+- `X-User-Role` (string, required): The role of the requesting user (`admin`, `faculty`, `student`).
+
+**Response:** 200 OK
+```json
+{
+  "message": "Announcement deleted",
+  "id": "ann-12345"
+}
+```
+
+**Response (Unauthorized or Not Found):** 404 Not Found
+*Note: The API deliberately obscures whether an announcement doesn't exist vs the user not having permission to prevent ID harvesting.*
+```json
+{
+  "detail": "Announcement not found or you don't have permission to delete it"
+}
+```
+
+---
+
 ## Rate Limits
 
 ### Rate Limiting Configuration

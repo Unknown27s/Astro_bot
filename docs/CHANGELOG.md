@@ -4,6 +4,23 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.0] - 2026-04-06
+
+### ✨ New Features
+
+#### Announcement Deletion & System Prompt Customizer
+- **Announcement Deletion**:
+  - Implemented `DELETE /api/announcements/{id}` endpoint to allow removal of announcements.
+  - Authorized securely using `X-User-ID` and `X-User-Role` headers: Users with the `admin` role can delete any announcement, while standard/faculty users can only delete announcements they authored themselves.
+  - UI added to the **React frontend** displaying a persistent delete confirmation flow natively inside the announcement pane.
+- **Dynamic System Prompt Editor**:
+  - Exchanged hardcoded `SYSTEM_PROMPT` in `config.py` for `.env`-driven dynamic configuration.
+  - Modified the **AI Settings Admin page** in the React application to include a multiline text editor area, letting Admins freely tune the assistant's tone and context logic on the fly. 
+- **Announcement Repetition Bug Fix**:
+  - Resolved an issue where successive `@Announcement` queries returned identical cached iterations. Now completely bypasses the `ChromaDB` conversation memory system guaranteeing fresh results each generation.
+
+---
+
 ## [2.2.0] - 2026-04-04
 
 ### ✨ New Features
