@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getRateLimits, updateRateLimit, toggleRateLimit, resetRateLimits } from '../../services/api';
-import { Save, RotateCcw, AlertTriangle, Shield, Activity } from 'lucide-react';
+import { Save, RotateCcw, AlertTriangle, Activity } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function RateLimitingPage() {
@@ -84,7 +84,23 @@ export default function RateLimitingPage() {
     }
   };
 
-  if (!limits) return <div className="text-center" style={{ padding: 48 }}><span className="spinner" /></div>;
+  if (!limits) {
+    return (
+      <div className="space-y-4" aria-busy="true" aria-label="Loading rate limits">
+        <section className="astro-glass rounded-2xl border border-white/10 p-5 animate-pulse">
+          <div className="h-5 w-36 rounded bg-white/10" />
+          <div className="mt-3 h-10 rounded-xl bg-white/5" />
+        </section>
+        {[1, 2, 3].map((idx) => (
+          <section key={idx} className="astro-glass rounded-xl border border-white/10 p-4 animate-pulse">
+            <div className="h-4 w-40 rounded bg-white/10" />
+            <div className="mt-3 h-10 rounded-xl bg-white/5" />
+            <div className="mt-2 h-10 rounded-xl bg-white/5" />
+          </section>
+        ))}
+      </div>
+    );
+  }
 
   const getCategoryColor = (endpoint) => {
     if (endpoint.includes('auth')) return '#FF6B6B';
@@ -107,158 +123,170 @@ export default function RateLimitingPage() {
   };
 
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h2>⚡ Rate Limiting Configuration</h2>
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-astro-headline text-2xl font-extrabold tracking-tight text-white">Rate Limiting</h2>
+          <p className="text-sm text-slate-300/85">Fine-tune endpoint throttling and enforce abuse protection.</p>
+        </div>
         <button
-          className="btn btn-danger"
+          className="inline-flex items-center gap-2 rounded-xl border border-rose-300/35 bg-rose-500/15 px-3 py-2 text-xs font-semibold text-rose-100 hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-60"
           onClick={handleReset}
           disabled={resetting}
           title="Reset all to defaults"
+          type="button"
+          aria-label="Reset all rate limits"
         >
-          {resetting ? <><span className="spinner" /> Resetting...</> : <><RotateCcw size={16} /> Reset Defaults</>}
+          {resetting ? <><span className="spinner" /> Resetting...</> : <><RotateCcw size={14} /> Reset Defaults</>}
         </button>
       </div>
-      <div className="divider" />
 
-      {/* Info Box */}
-      <div className="card" style={{ marginBottom: 16, backgroundColor: 'rgba(255, 193, 7, 0.1)', borderLeft: '4px solid #FFC107' }}>
+      <section className="astro-glass rounded-xl border border-amber-300/35 bg-amber-500/10 p-4 text-amber-100">
         <div className="flex gap-2">
-          <AlertTriangle size={20} style={{ color: '#FFC107', flexShrink: 0 }} />
+          <AlertTriangle size={18} className="mt-0.5 flex-shrink-0 text-amber-200" />
           <div>
-            <p style={{ fontSize: 14, margin: 0 }}>
-              <strong>Rate Limiting:</strong> Controls requests per user/IP per time window. Limits apply globally and per endpoint.
+            <p className="text-sm">
+              <strong>Rate Limiting</strong> controls requests per user or IP within a window. Changes apply immediately.
             </p>
-            <p style={{ fontSize: 13, color: 'var(--text-muted)', margin: '4px 0 0' }}>
-              Disabled limits will not enforce throttling. Changes apply immediately.
+            <p className="mt-1 text-xs text-amber-100/85">
+              Disabled limits do not enforce throttling, but endpoint activity is still tracked.
             </p>
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Rate Limits Grid */}
-      <div style={{ display: 'grid', gap: 12 }}>
+      <section className="grid gap-3">
         {limits.map(item => (
-          <div key={item.id} className="card" style={{
-            borderLeft: `4px solid ${getCategoryColor(item.endpoint)}`,
-            opacity: item.enabled ? 1 : 0.6
-          }}>
-            <div className="flex items-start justify-between" style={{ marginBottom: 12 }}>
-              <div className="flex items-center gap-2">
-                <span style={{ fontSize: 20 }}>{getCategoryIcon(item.endpoint)}</span>
+          <article
+            key={item.id}
+            className="astro-glass rounded-xl border p-4"
+            style={{
+              borderColor: `${getCategoryColor(item.endpoint)}66`,
+              opacity: item.enabled ? 1 : 0.65
+            }}
+          >
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="flex items-start gap-2">
+                <span className="text-lg leading-none">{getCategoryIcon(item.endpoint)}</span>
                 <div>
-                  <h3 style={{ margin: '0 0 2px', fontSize: 16 }}>{item.endpoint}</h3>
-                  <p style={{ margin: 0, fontSize: 13, color: 'var(--text-muted)' }}>
-                    {item.description || 'No description'}
-                  </p>
+                  <h3 className="text-base font-semibold text-white">{item.endpoint}</h3>
+                  <p className="text-xs text-slate-300/80">{item.description || 'No description'}</p>
                 </div>
               </div>
               <button
-                className={`btn btn-sm ${item.enabled ? 'btn-primary' : 'btn-ghost'}`}
+                className={[
+                  'rounded-xl px-3 py-1.5 text-xs font-semibold',
+                  item.enabled
+                    ? 'border border-cyan-300/45 bg-cyan-500/20 text-cyan-100 hover:bg-cyan-500/30'
+                    : 'border border-white/15 bg-white/5 text-slate-200 hover:bg-white/10'
+                ].join(' ')}
                 onClick={() => handleToggle(item)}
                 disabled={saving[item.id]}
-                style={{ minWidth: 100 }}
+                type="button"
+                aria-label={`${item.enabled ? 'Disable' : 'Enable'} rate limiting for ${item.endpoint}`}
               >
-                {saving[item.id] ? <><span className="spinner" /> Toggling...</> : (item.enabled ? '✓ Enabled' : '○ Disabled')}
+                {saving[item.id] ? 'Toggling...' : (item.enabled ? 'Enabled' : 'Disabled')}
               </button>
             </div>
 
-            <div className="grid-2" style={{ gap: 12, marginBottom: 12 }}>
+            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label>Requests per Window</label>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-slate-300/70">Requests per window</label>
                 <input
                   type="number"
                   min="1"
                   value={editing[item.id]?.limit_requests || item.limit_requests}
                   onChange={e => setEditing(prev => ({
                     ...prev,
-                    [item.id]: { ...prev[item.id], limit_requests: parseInt(e.target.value) }
+                    [item.id]: { ...prev[item.id], limit_requests: parseInt(e.target.value, 10) }
                   }))}
                   disabled={!item.enabled || saving[item.id]}
+                  className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white"
                   style={{ opacity: item.enabled ? 1 : 0.5 }}
+                  aria-label={`Requests per window for ${item.endpoint}`}
                 />
               </div>
               <div>
-                <label>Window Size (seconds)</label>
+                <label className="mb-1 block text-xs font-semibold uppercase tracking-[0.1em] text-slate-300/70">Window size (seconds)</label>
                 <input
                   type="number"
                   min="1"
                   value={editing[item.id]?.limit_window_seconds || item.limit_window_seconds}
                   onChange={e => setEditing(prev => ({
                     ...prev,
-                    [item.id]: { ...prev[item.id], limit_window_seconds: parseInt(e.target.value) }
+                    [item.id]: { ...prev[item.id], limit_window_seconds: parseInt(e.target.value, 10) }
                   }))}
                   disabled={!item.enabled || saving[item.id]}
+                  className="w-full rounded-xl border border-white/15 bg-black/20 px-3 py-2 text-sm text-white"
                   style={{ opacity: item.enabled ? 1 : 0.5 }}
+                  aria-label={`Window size in seconds for ${item.endpoint}`}
                 />
               </div>
             </div>
 
-            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-              <div style={{ flex: 1, fontSize: 12, color: 'var(--text-muted)' }}>
-                <Activity size={12} style={{ marginRight: 4, display: 'inline' }} />
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-300/80">
+              <span className="inline-flex items-center gap-1">
+                <Activity size={12} />
                 {item.limit_requests} reqs / {item.limit_window_seconds}s
-                {item.updated_by && ` • Updated by ${item.updated_by}`}
-              </div>
+                {item.updated_by && ` - Updated by ${item.updated_by}`}
+              </span>
               <button
-                className={`btn btn-sm ${editing[item.id] ? 'btn-primary' : 'btn-ghost'}`}
+                className="inline-flex items-center gap-1 rounded-xl border border-cyan-300/45 bg-cyan-500/15 px-3 py-1.5 text-xs font-semibold text-cyan-100 hover:bg-cyan-500/25 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={() => handleUpdateLimit(item)}
                 disabled={!item.enabled || !editing[item.id] || saving[item.id]}
+                type="button"
+                aria-label={`Save rate limit settings for ${item.endpoint}`}
               >
-                {saving[item.id] ? <><span className="spinner" /> Saving...</> : <><Save size={14} /> Save</>}
+                {saving[item.id] ? 'Saving...' : <><Save size={12} /> Save</>}
               </button>
             </div>
-          </div>
+          </article>
         ))}
-      </div>
+      </section>
 
-      {/* Rate Limit Guidelines */}
-      <div className="card" style={{ marginTop: 24, backgroundColor: 'rgba(76, 175, 80, 0.05)' }}>
-        <h3 style={{ marginBottom: 12 }}>📊 Rate Limit Guidelines</h3>
-        <table style={{
-          width: '100%',
-          fontSize: 13,
-          borderCollapse: 'collapse'
-        }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid var(--border)' }}>
-              <th style={{ textAlign: 'left', padding: '8px 0', fontWeight: 600 }}>Endpoint</th>
-              <th style={{ textAlign: 'left', padding: '8px 0', fontWeight: 600 }}>Recommended</th>
-              <th style={{ textAlign: 'left', padding: '8px 0', fontWeight: 600 }}>Purpose</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[
-              { endpoint: 'auth', recommended: '5/60s', purpose: 'Brute-force protection for login attempts' },
-              { endpoint: 'chat', recommended: '5/60s', purpose: 'Expensive LLM queries, GPU-intensive' },
-              { endpoint: 'upload', recommended: '10/60s', purpose: 'Document upload, I/O intensive' },
-              { endpoint: 'tags', recommended: '30/60s', purpose: 'Tag CRUD operations, moderate load' },
-              { endpoint: 'read', recommended: '60/60s', purpose: 'Read-only operations like listing' },
-              { endpoint: 'classify', recommended: '30/60s', purpose: 'Classification operations' },
-              { endpoint: 'global', recommended: '100/60s', purpose: 'All requests combined fallback' },
-            ].map((guide, idx) => (
-              <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                <td style={{ padding: '8px 0', fontWeight: 500 }}>{guide.endpoint}</td>
-                <td style={{ padding: '8px 0', color: 'var(--text-muted)' }}>{guide.recommended}</td>
-                <td style={{ padding: '8px 0', color: 'var(--text-muted)' }}>{guide.purpose}</td>
+      <section className="astro-glass overflow-hidden rounded-xl border border-white/10">
+        <div className="border-b border-white/10 px-4 py-3">
+          <h3 className="text-sm font-semibold text-white">Rate Limit Guidelines</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-white/5 text-xs uppercase tracking-[0.12em] text-slate-300/80">
+              <tr>
+                <th className="px-4 py-3 text-left">Endpoint</th>
+                <th className="px-4 py-3 text-left">Recommended</th>
+                <th className="px-4 py-3 text-left">Purpose</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {[
+                { endpoint: 'auth', recommended: '5/60s', purpose: 'Brute-force protection for login attempts' },
+                { endpoint: 'chat', recommended: '5/60s', purpose: 'Expensive LLM queries, GPU-intensive' },
+                { endpoint: 'upload', recommended: '10/60s', purpose: 'Document upload, I/O intensive' },
+                { endpoint: 'tags', recommended: '30/60s', purpose: 'Tag CRUD operations, moderate load' },
+                { endpoint: 'read', recommended: '60/60s', purpose: 'Read-only operations like listing' },
+                { endpoint: 'classify', recommended: '30/60s', purpose: 'Classification operations' },
+                { endpoint: 'global', recommended: '100/60s', purpose: 'All requests combined fallback' }
+              ].map((guide, idx) => (
+                <tr key={idx} className="border-t border-white/10 text-slate-100/90">
+                  <td className="px-4 py-3 font-semibold">{guide.endpoint}</td>
+                  <td className="px-4 py-3 text-slate-300/90">{guide.recommended}</td>
+                  <td className="px-4 py-3 text-slate-300/90">{guide.purpose}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
 
-      {/* Admin Notes */}
-      <div className="card" style={{ marginTop: 16, backgroundColor: 'rgba(33, 150, 243, 0.05)' }}>
-        <h3>ℹ️ Admin Notes</h3>
-        <ul style={{ fontSize: 13, color: 'var(--text-muted)', margin: 0, paddingLeft: 20 }}>
-          <li>Rate limits are applied per user (authenticated) or per IP (anonymous)</li>
-          <li>Authenticated users have their X-User-ID prioritized in rate limit key</li>
-          <li>Limits reset every window period (e.g., 60s means new count every minute)</li>
-          <li>Disabling a limit removes throttling but endpoint is still logged</li>
-          <li>Reset defaults is irreversible - backup current settings if needed</li>
-          <li>Global limit acts as fallback when endpoint-specific limit is exceeded</li>
+      <section className="astro-glass rounded-xl border border-white/10 p-4 text-sm text-slate-300/85">
+        <h3 className="font-semibold text-white">Admin Notes</h3>
+        <ul className="mt-2 list-disc space-y-1 pl-5">
+          <li>Limits are applied per authenticated user ID or anonymous IP.</li>
+          <li>Window-based counters reset every configured period.</li>
+          <li>Disabling a limit removes throttling for that endpoint.</li>
+          <li>Global limit acts as a fallback safety net.</li>
         </ul>
-      </div>
+      </section>
     </div>
   );
 }

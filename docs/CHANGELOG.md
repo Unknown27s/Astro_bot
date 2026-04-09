@@ -4,6 +4,77 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.3] - 2026-04-09
+
+### 🐛 Bug Fixes
+
+#### Java Startup Reliability (Windows Launchers)
+- Updated startup scripts to resolve and validate `JAVA_HOME` before starting Spring Boot:
+  - `start-all-servers.bat`
+  - `start-all-servers.ps1`
+- Launchers now fail early with a clear message when JDK 17+ is unavailable or `JAVA_HOME` is invalid.
+- Spring Boot startup now uses Maven wrapper with resolved `JAVA_HOME` to avoid environment mismatch errors.
+
+### 🎨 UI Improvements
+
+#### Exact Logo Override Path (React)
+- Chat UI now supports runtime override image at:
+  - `react-frontend/public/astrobot-logo.png`
+- If override file is absent, UI falls back to existing bundled SVG logo.
+- Applied in:
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatSidebar.jsx`
+  - `react-frontend/src/components/chat/BotMessage.jsx`
+
+## [2.3.2] - 2026-04-09
+
+### 🎨 UI Improvements
+
+#### Chat Workspace and Announcements UX Polish (React)
+- Added a dedicated announcements workspace view with Discord-style section switching in chat sidebar.
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatSidebar.jsx`
+- Clicking an announcement now opens full announcement details in the main panel.
+- Added AstroBot logo placements across chat surfaces for consistent visual identity:
+  - Sidebar header
+  - Chat workspace header
+  - Welcome card chip
+  - Bot message avatar
+  - `react-frontend/src/assets/astrobot-logo.svg` (new)
+- Improved message/input readability and contrast for better usability:
+  - `react-frontend/src/components/chat/BotMessage.jsx`
+  - `react-frontend/src/components/chat/UserMessage.jsx`
+  - `react-frontend/src/components/chat/ChatInputArea.jsx`
+- Refined chat/announcement tab behavior so switching tabs does not reset active chat history.
+
+### ✅ Compatibility
+- No backend endpoint changes.
+- No API contract changes.
+
+## [2.3.1] - 2026-04-09
+
+### 🎨 UI Improvements
+
+#### Admin Console Redesign Completed (React)
+- Fully redesigned admin pages with consistent responsive glass-dashboard UI while preserving API-backed behavior:
+  - `react-frontend/src/pages/admin/DocumentsPage.jsx`
+  - `react-frontend/src/pages/admin/AnalyticsPage.jsx`
+  - `react-frontend/src/pages/admin/UsersPage.jsx`
+  - `react-frontend/src/pages/admin/SettingsPage.jsx`
+  - `react-frontend/src/pages/admin/HealthPage.jsx`
+  - `react-frontend/src/pages/admin/MemoryPage.jsx`
+  - `react-frontend/src/pages/admin/RateLimitingPage.jsx`
+- No admin API contract changes were introduced; redesign is presentation/UX-focused and retains existing endpoint integrations.
+
+### 🐛 Bug Fixes
+
+#### Duplicate Document Stats Route Consolidation
+- `api_server.py`: Removed duplicate definitions of `GET /api/documents/stats` and consolidated into one canonical handler.
+- Preserved alias behavior by keeping `GET /api/knowledge-base/stats` mapped to the same canonical implementation.
+- Impact: Prevents route shadowing/ambiguity and ensures stable stats responses across clients.
+
+---
+
 ## [2.3.0] - 2026-04-06
 
 ### ✨ New Features

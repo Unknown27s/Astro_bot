@@ -615,6 +615,7 @@ def api_delete_document(doc_id: str):
 
 
 @app.get("/api/documents/stats")
+@app.get("/api/knowledge-base/stats")
 def api_documents_stats():
     """Get knowledge base statistics (total chunks indexed)."""
     from ingestion.embedder import get_collection_stats
@@ -1038,14 +1039,6 @@ def api_test_provider(provider: str):
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
 
-@app.get("/api/documents/stats")
-@app.get("/api/knowledge-base/stats")
-def api_knowledge_base_stats():
-    """Get vector DB collection stats."""
-    from ingestion.embedder import get_collection_stats
-    return get_collection_stats()
-
-
 # ── Helper: update .env file ──
 
 def _update_env_var(key: str, value: str):
@@ -1204,11 +1197,6 @@ def api_reset_rate_limits(request: Request):
 
     logger.warning(f"Rate limits reset to default by {get_user_id(request)}")
     return {"reset": True, "message": "All rate limits have been reset to default values"}
-
-@app.get("/api/documents/stats")  # ← ADD THIS
-def api_documents_stats():
-    from ingestion.embedder import get_collection_stats
-    return get_collection_stats()
 
 # ═══════════════════════════════════════════════════════
 # ENTRY POINT

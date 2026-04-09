@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getMemoryStats, deleteMemoryEntry, runMemoryCleanup, clearAllMemory } from '../../services/api';
-import { RefreshCw, Trash2, AlertCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function MemoryPage() {
@@ -67,110 +67,122 @@ export default function MemoryPage() {
 
   if (!stats || loading) {
     return (
-      <div className="text-center" style={{ padding: 48 }}>
-        <span className="spinner" />
+      <div className="space-y-4" aria-busy="true" aria-label="Loading memory dashboard">
+        <section className="astro-glass rounded-2xl border border-white/10 p-5 animate-pulse">
+          <div className="h-5 w-48 rounded bg-white/10" />
+          <div className="mt-3 h-10 rounded-xl bg-white/5" />
+        </section>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {[1, 2, 3, 4].map((idx) => (
+            <div key={idx} className="astro-glass rounded-xl border border-white/10 p-4 animate-pulse">
+              <div className="h-3 w-24 rounded bg-white/10" />
+              <div className="mt-2 h-7 w-20 rounded bg-white/10" />
+            </div>
+          ))}
+        </div>
       </div>
     );
   }
 
   const { enabled, stats: statsData } = stats;
 
+  const tabs = [
+    { id: 'statistics', label: 'Statistics' },
+    { id: 'manage', label: 'Cleanup' },
+    { id: 'settings', label: 'Settings' }
+  ];
+
   return (
-    <div>
-      <div className="flex items-center justify-between">
-        <h2>💾 Conversation Memory</h2>
-        <button className="btn btn-ghost" onClick={fetchStats} disabled={loading}>
-          <RefreshCw size={16} className={loading ? 'spin' : ''} /> Refresh
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="font-astro-headline text-2xl font-extrabold tracking-tight text-white">Conversation Memory</h2>
+          <p className="text-sm text-slate-300/85">Inspect semantic cache usage and run maintenance actions.</p>
+        </div>
+        <button
+          className="inline-flex items-center gap-2 rounded-xl border border-white/20 bg-white/5 px-3 py-2 text-xs font-semibold text-slate-100 hover:bg-white/10"
+          onClick={fetchStats}
+          disabled={loading}
+          type="button"
+          aria-label="Refresh memory statistics"
+        >
+          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Refresh
         </button>
       </div>
-      <div className="divider" />
 
       {!enabled && (
-        <div className="card" style={{ background: 'var(--warning-light)', borderLeft: '4px solid var(--warning)' }}>
+        <section className="astro-glass rounded-xl border border-amber-300/35 bg-amber-400/10 p-4 text-amber-100">
           <div className="flex items-start gap-2">
-            <AlertCircle size={20} style={{ color: 'var(--warning)', marginTop: 2 }} />
+            <AlertCircle size={18} className="mt-0.5 text-amber-200" />
             <div>
-              <strong>Memory is currently disabled</strong>
-              <p style={{ marginTop: 4, fontSize: 14, color: 'var(--text-secondary)' }}>
-                Enable memory in <code>.env</code>: <code>CONV_ENABLED=true</code> and restart FastAPI
+              <p className="font-semibold">Memory is currently disabled</p>
+              <p className="mt-1 text-sm text-amber-100/90">
+                Enable in <code>.env</code> with <code>CONV_ENABLED=true</code> and restart the FastAPI service.
               </p>
             </div>
           </div>
-        </div>
+        </section>
       )}
 
-      {/* Tab Navigation */}
-      <div className="flex gap-2" style={{ marginBottom: 16, borderBottom: '1px solid var(--border)' }}>
-        <button
-          onClick={() => setActiveTab('statistics')}
-          className={`tab ${activeTab === 'statistics' ? 'active' : ''}`}
-        >
-          📊 Statistics
-        </button>
-        <button
-          onClick={() => setActiveTab('manage')}
-          className={`tab ${activeTab === 'manage' ? 'active' : ''}`}
-        >
-          🧹 Cleanup
-        </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`tab ${activeTab === 'settings' ? 'active' : ''}`}
-        >
-          ⚙️ Settings
-        </button>
+      <div className="flex flex-wrap gap-2 border-b border-white/10 pb-2">
+        {tabs.map(tab => (
+          <button
+            key={tab.id}
+            type="button"
+            onClick={() => setActiveTab(tab.id)}
+            aria-label={`Switch to ${tab.label} tab`}
+            className={[
+              'rounded-xl px-3 py-2 text-sm font-semibold transition',
+              activeTab === tab.id
+                ? 'border border-cyan-300/40 bg-cyan-300/15 text-cyan-100'
+                : 'border border-white/10 bg-white/5 text-slate-300 hover:bg-white/10'
+            ].join(' ')}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {/* Tab 1: Statistics */}
       {activeTab === 'statistics' && (
-        <div>
-          <h3>📊 Memory Statistics</h3>
-          <div className="grid-4" style={{ marginBottom: 24 }}>
-            <div className="card stat-card">
-              <div className="text-sm text-muted">Total Entries</div>
-              <div style={{ fontSize: 32, fontWeight: 'bold', marginTop: 8 }}>
-                {statsData.total_entries}
-              </div>
-            </div>
-            <div className="card stat-card">
-              <div className="text-sm text-muted">Avg Usage Per Entry</div>
-              <div style={{ fontSize: 32, fontWeight: 'bold', marginTop: 8 }}>
-                {statsData.avg_usage_per_entry.toFixed(2)}
-              </div>
-            </div>
-            <div className="card stat-card">
-              <div className="text-sm text-muted">Cache Hit Rate</div>
-              <div style={{ fontSize: 32, fontWeight: 'bold', marginTop: 8 }}>
+        <section className="space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <article className="astro-glass rounded-xl border border-white/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300/80">Total Entries</p>
+              <p className="mt-2 text-3xl font-bold text-white">{statsData.total_entries}</p>
+            </article>
+            <article className="astro-glass rounded-xl border border-white/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300/80">Avg Usage</p>
+              <p className="mt-2 text-3xl font-bold text-white">{statsData.avg_usage_per_entry.toFixed(2)}</p>
+            </article>
+            <article className="astro-glass rounded-xl border border-white/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300/80">Cache Hit Rate</p>
+              <p className="mt-2 text-3xl font-bold text-white">
                 {statsData.total_entries > 0 ? (statsData.avg_usage_per_entry * 100).toFixed(0) : '0'}%
-              </div>
-            </div>
-            <div className="card stat-card">
-              <div className="text-sm text-muted">Status</div>
-              <div style={{ fontSize: 14, marginTop: 8 }}>
-                <span className="badge badge-ok">{enabled ? 'Enabled' : 'Disabled'}</span>
-              </div>
-            </div>
+              </p>
+            </article>
+            <article className="astro-glass rounded-xl border border-white/10 p-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-300/80">Status</p>
+              <p className="mt-2 text-sm font-semibold text-white">{enabled ? 'Enabled' : 'Disabled'}</p>
+            </article>
           </div>
 
-          {/* By-User Breakdown */}
           {statsData.by_user && statsData.by_user.length > 0 && (
-            <div>
-              <h3>By User</h3>
-              <div className="table-responsive" style={{ marginBottom: 24 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border)' }}>
-                      <th style={{ padding: 12, textAlign: 'left' }}>User</th>
-                      <th style={{ padding: 12, textAlign: 'center' }}>Entries</th>
-                      <th style={{ padding: 12, textAlign: 'center' }}>Avg Usage</th>
+            <div className="astro-glass overflow-hidden rounded-xl border border-white/10">
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-white/5 text-xs uppercase tracking-[0.12em] text-slate-300/80">
+                    <tr>
+                      <th className="px-4 py-3 text-left">User</th>
+                      <th className="px-4 py-3 text-center">Entries</th>
+                      <th className="px-4 py-3 text-center">Avg Usage</th>
                     </tr>
                   </thead>
                   <tbody>
                     {statsData.by_user.map((row, idx) => (
-                      <tr key={idx} style={{ borderBottom: '1px solid var(--border)' }}>
-                        <td style={{ padding: 12 }}>{row.username || 'Global'}</td>
-                        <td style={{ padding: 12, textAlign: 'center' }}>{row.entries}</td>
-                        <td style={{ padding: 12, textAlign: 'center' }}>{row.avg_usage.toFixed(2)}</td>
+                      <tr key={idx} className="border-t border-white/10 text-slate-100/90">
+                        <td className="px-4 py-3">{row.username || 'Global'}</td>
+                        <td className="px-4 py-3 text-center">{row.entries}</td>
+                        <td className="px-4 py-3 text-center">{row.avg_usage.toFixed(2)}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -180,103 +192,96 @@ export default function MemoryPage() {
           )}
 
           {statsData.total_entries === 0 && (
-            <div className="card" style={{ textAlign: 'center', padding: 32, background: 'var(--bg-secondary)' }}>
-              <p style={{ color: 'var(--text-secondary)' }}>
-                No memory entries yet. Start asking questions to populate the cache!
-              </p>
+            <div className="astro-glass rounded-xl border border-white/10 p-6 text-center text-sm text-slate-300/80">
+              No memory entries yet. Start asking questions to populate the cache.
             </div>
           )}
-        </div>
+        </section>
       )}
 
-      {/* Tab 2: Cleanup */}
       {activeTab === 'manage' && (
-        <div>
-          <h3>🧹 Memory Maintenance</h3>
-          <div className="card" style={{ marginBottom: 16, padding: 20 }}>
-            <div style={{ marginBottom: 16 }}>
-              <h4 style={{ marginBottom: 8 }}>Manual Cleanup</h4>
-              <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                Remove entries older than 90 days and responses with low usage (&lt;1 use).
-              </p>
+        <section className="space-y-4">
+          <article className="astro-glass rounded-xl border border-white/10 p-5">
+            <h3 className="text-base font-semibold text-white">Manual Cleanup</h3>
+            <p className="mt-2 text-sm text-slate-300/85">
+              Removes entries older than 90 days and low-use responses.
+            </p>
+            <div className="mt-4">
               <button
-                className="btn btn-primary"
+                className="rounded-xl bg-cyan-500 px-4 py-2 text-sm font-semibold text-white hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleCleanup}
                 disabled={cleaningUp || !enabled}
+                type="button"
+                aria-label="Run memory cleanup"
               >
-                {cleaningUp ? '⏳ Running cleanup...' : '🧹 Run Cleanup'}
+                {cleaningUp ? 'Running Cleanup...' : 'Run Cleanup'}
               </button>
             </div>
-          </div>
+          </article>
 
-          <div className="card" style={{ padding: 20, borderLeft: '4px solid var(--error)' }}>
-            <div>
-              <h4 style={{ marginBottom: 8, color: 'var(--error)' }}>⚠️ Clear All Memory</h4>
-              <p style={{ fontSize: 14, color: 'var(--text-secondary)', marginBottom: 16 }}>
-                Permanently delete ALL conversation memory. This action cannot be undone.
-              </p>
+          <article className="astro-glass rounded-xl border border-rose-300/35 bg-rose-500/10 p-5">
+            <h3 className="text-base font-semibold text-rose-100">Danger Zone: Clear All Memory</h3>
+            <p className="mt-2 text-sm text-rose-100/85">
+              Permanently deletes all conversation memory and cannot be undone.
+            </p>
+            <div className="mt-4">
               <button
-                className="btn"
-                style={{ background: 'var(--error)', color: 'white' }}
+                className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-400 disabled:cursor-not-allowed disabled:opacity-60"
                 onClick={handleClearAll}
                 disabled={clearing || !enabled}
+                type="button"
+                aria-label="Clear all conversation memory"
               >
-                {clearing ? '⏳ Clearing...' : '🗑️ Clear All Memory'}
+                {clearing ? 'Clearing...' : 'Clear All Memory'}
               </button>
             </div>
-          </div>
-        </div>
+          </article>
+        </section>
       )}
 
-      {/* Tab 3: Settings */}
       {activeTab === 'settings' && (
-        <div>
-          <h3>⚙️ Memory Configuration</h3>
-          <div className="card" style={{ marginBottom: 16 }}>
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <section className="space-y-4">
+          <div className="astro-glass overflow-hidden rounded-xl border border-white/10">
+            <table className="min-w-full text-sm">
               <tbody>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: 12, fontWeight: 'bold', width: '40%' }}>Status</td>
-                  <td style={{ padding: 12 }}>
-                    <span className={`badge ${enabled ? 'badge-ok' : 'badge-err'}`}>
-                      {enabled ? 'Enabled' : 'Disabled'}
-                    </span>
-                  </td>
+                <tr className="border-b border-white/10">
+                  <td className="px-4 py-3 font-semibold text-slate-200">Status</td>
+                  <td className="px-4 py-3 text-slate-100">{enabled ? 'Enabled' : 'Disabled'}</td>
                 </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: 12, fontWeight: 'bold' }}>Match Threshold</td>
-                  <td style={{ padding: 12 }}>0.88 (strict semantic matching)</td>
+                <tr className="border-b border-white/10">
+                  <td className="px-4 py-3 font-semibold text-slate-200">Match Threshold</td>
+                  <td className="px-4 py-3 text-slate-100">0.88 (strict semantic matching)</td>
                 </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: 12, fontWeight: 'bold' }}>Storage Type</td>
-                  <td style={{ padding: 12 }}>ChromaDB (vector) + SQLite (metadata)</td>
+                <tr className="border-b border-white/10">
+                  <td className="px-4 py-3 font-semibold text-slate-200">Storage Type</td>
+                  <td className="px-4 py-3 text-slate-100">ChromaDB (vector) + SQLite (metadata)</td>
                 </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: 12, fontWeight: 'bold' }}>Scope</td>
-                  <td style={{ padding: 12 }}>Global (shared institutional knowledge)</td>
+                <tr className="border-b border-white/10">
+                  <td className="px-4 py-3 font-semibold text-slate-200">Scope</td>
+                  <td className="px-4 py-3 text-slate-100">Global (shared institutional knowledge)</td>
                 </tr>
-                <tr style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: 12, fontWeight: 'bold' }}>TTL</td>
-                  <td style={{ padding: 12 }}>90 days (automatically expired)</td>
+                <tr className="border-b border-white/10">
+                  <td className="px-4 py-3 font-semibold text-slate-200">TTL</td>
+                  <td className="px-4 py-3 text-slate-100">90 days (automatically expired)</td>
                 </tr>
                 <tr>
-                  <td style={{ padding: 12, fontWeight: 'bold' }}>Persistence</td>
-                  <td style={{ padding: 12 }}>Enabled (ChromaDB collection)</td>
+                  <td className="px-4 py-3 font-semibold text-slate-200">Persistence</td>
+                  <td className="px-4 py-3 text-slate-100">Enabled (ChromaDB collection)</td>
                 </tr>
               </tbody>
             </table>
           </div>
 
-          <div className="card" style={{ background: 'var(--bg-secondary)' }}>
-            <h4 style={{ marginBottom: 8 }}>📝 To modify settings:</h4>
-            <ol style={{ marginLeft: 16, color: 'var(--text-secondary)', fontSize: 14 }}>
-              <li style={{ marginBottom: 6 }}>Edit <code>.env</code> file in project root</li>
-              <li style={{ marginBottom: 6 }}>Update variables: <code>CONV_ENABLED</code>, <code>CONV_MATCH_THRESHOLD</code>, etc.</li>
-              <li style={{ marginBottom: 6 }}>Restart FastAPI server</li>
-              <li>Settings will take effect immediately</li>
+          <article className="astro-glass rounded-xl border border-white/10 p-5 text-sm text-slate-300/90">
+            <h3 className="text-base font-semibold text-white">How to modify memory settings</h3>
+            <ol className="mt-3 list-decimal space-y-2 pl-5">
+              <li>Edit the <code>.env</code> file in project root.</li>
+              <li>Update values like <code>CONV_ENABLED</code> and <code>CONV_MATCH_THRESHOLD</code>.</li>
+              <li>Restart FastAPI server.</li>
+              <li>Refresh this page to verify values.</li>
             </ol>
-          </div>
-        </div>
+          </article>
+        </section>
       )}
     </div>
   );

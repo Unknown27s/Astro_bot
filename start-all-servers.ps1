@@ -30,24 +30,39 @@ catch {
     exit 1
 }
 
-# Check Java
-try {
-    $javaVersion = java -version 2>&1
-    Write-Host "✅ Java found" -ForegroundColor Green
+# Resolve JAVA_HOME (required by Maven wrapper)
+$resolvedJavaHome = $null
+
+if ($env:JAVA_HOME -and (Test-Path (Join-Path $env:JAVA_HOME 'bin\java.exe'))) {
+    $resolvedJavaHome = $env:JAVA_HOME
 }
-catch {
-    Write-Host "❌ Java not found. Please install Java 17+." -ForegroundColor Red
+
+if (-not $resolvedJavaHome) {
+    $javaCommand = Get-Command java -ErrorAction SilentlyContinue
+    if ($javaCommand) {
+        $javaBinDir = Split-Path -Parent $javaCommand.Source
+        $candidateJavaHome = (Resolve-Path (Join-Path $javaBinDir '..')).Path
+        if (Test-Path (Join-Path $candidateJavaHome 'bin\java.exe')) {
+            $resolvedJavaHome = $candidateJavaHome
+        }
+    }
+}
+
+if (-not $resolvedJavaHome) {
+    Write-Host "❌ JAVA_HOME could not be resolved." -ForegroundColor Red
+    Write-Host "   Install JDK 17+ and set JAVA_HOME to your JDK folder." -ForegroundColor Yellow
     exit 1
 }
 
-# Check Maven
-try {
-    $mvnVersion = mvn --version 2>&1
-    Write-Host "✅ Maven found" -ForegroundColor Green
+$env:JAVA_HOME = $resolvedJavaHome
+Write-Host "✅ Java found: $($env:JAVA_HOME)" -ForegroundColor Green
+
+$mvnwPath = Join-Path $scriptPath 'springboot-backend\mvnw.cmd'
+if (-not (Test-Path $mvnwPath)) {
+    Write-Host "❌ Maven wrapper not found: $mvnwPath" -ForegroundColor Red
+    exit 1
 }
-catch {
-    Write-Host "⚠️  Maven not found. Spring Boot server may fail to start." -ForegroundColor Yellow
-}
+Write-Host "✅ Maven wrapper found" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "═════════════════════════════════════════════════════════════════" -ForegroundColor Cyan
@@ -73,7 +88,8 @@ Start-Sleep -Seconds 3
 
 # 3. Start Spring Boot Backend
 Write-Host "3️⃣  Starting Spring Boot Backend Server..." -ForegroundColor Cyan
-$springTerminal = Start-Process powershell -ArgumentList "-NoExit", "-Command", "cd '$scriptPath\springboot-backend'; mvn spring-boot:run" -PassThru
+$springCommand = "$env:JAVA_HOME = '$($env:JAVA_HOME)'; cd '$scriptPath\springboot-backend'; .\mvnw.cmd spring-boot:run"
+$springTerminal = Start-Process powershell -ArgumentList "-NoExit", "-Command", $springCommand -PassThru
 Write-Host "   ✅ Spring Boot server started (PID: $($springTerminal.Id))" -ForegroundColor Green
 Write-Host "   📍 Access at: http://localhost:8080" -ForegroundColor Cyan
 Write-Host ""

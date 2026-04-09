@@ -19,7 +19,7 @@ export const register = (username, password, role, fullName) =>
 
 // ── Chat ──
 export const sendChat = (query, userId, username) =>
-  api.post('/chat', { query, userId, username });
+  api.post('/chat', { query, userId, user_id: userId, username });
 
 export const sendAudioMessage = (audioBlob, userId, username) => {
   const formData = new FormData();
