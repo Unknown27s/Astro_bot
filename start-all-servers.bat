@@ -1,4 +1,9 @@
 @echo off
+setlocal
+
+REM Ensure script runs from project root no matter where it is launched from
+cd /d "%~dp0"
+
 REM ═══════════════════════════════════════════════════════════════════════════
 REM IMS AstroBot — Start All Servers (Batch version for Windows)
 REM Launches Python API, React Frontend, and Spring Boot Backend
@@ -11,6 +16,19 @@ echo ═════════════════════════
 echo                    IMS ASTROBOT - START ALL SERVERS
 echo ══════════════════════════════════════════════════════════════════════════
 echo.
+
+REM Fix JAVA_HOME for Maven wrapper
+set "JAVA_HOME=C:\Program Files\Java\jdk-21"
+set "PATH=%JAVA_HOME%\bin;%PATH%"
+
+if not exist "%JAVA_HOME%\bin\java.exe" (
+    color 0C
+    echo ERROR: JAVA_HOME path is invalid:
+    echo        %JAVA_HOME%
+    echo Please install JDK 17 or update JAVA_HOME in this script.
+    pause
+    exit /b 1
+)
 
 REM Check Python
 echo Checking Python...
@@ -41,6 +59,7 @@ if errorlevel 1 (
     echo [WARNING] Java not found. Spring Boot may not start.
 ) else (
     echo [OK] Java found
+    echo [OK] JAVA_HOME = %JAVA_HOME%
 )
 echo.
 
@@ -52,7 +71,7 @@ echo.
 REM 1. Start Python API Server
 echo 1. Starting Python FastAPI Server...
 start "AstroBot - Python API Server" cmd /k "python api_server.py"
-echo    - Running on http://localhost:8001/docs
+echo    - Running on http://localhost:8000/docs
 echo    - New terminal window opened
 echo.
 timeout /t 2 /nobreak
@@ -82,8 +101,8 @@ echo.
 echo SERVICES RUNNING:
 echo.
 echo   1. Python FastAPI API
-echo      URL: http://localhost:8001
-echo      Docs: http://localhost:8001/docs
+echo      URL: http://localhost:8000
+echo      Docs: http://localhost:8000/docs
 echo.
 echo   2. React Frontend
 echo      URL: http://localhost:5173

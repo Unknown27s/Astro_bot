@@ -1,0 +1,73 @@
+/* Design Tokens - Colors */
+:root {
+  /* Primary Purple */
+  --primary-50: #F3E8FF;
+  --primary-100: #E9D5FF;
+  --primary-200: #D8B4FE;
+  --primary-300: #C084FC;
+  --primary-400: #A855F7;
+  --primary-500: #9333EA;
+  --primary-600: #7E22CE;
+  --primary-700: #6D28D9;
+  --primary-800: #5B21B6;
+  --primary-900: #3F0F5C;
+
+  /* Secondary Teal */
+  --secondary-50: #F0FDFA;
+  --secondary-100: #CCFBF1;
+  --secondary-200: #99F6E4;
+  --secondary-300: #5EEAD4;
+  --secondary-400: #2DD4BF;
+  --secondary-500: #14B8A6;
+  --secondary-600: #0D9488;
+  --secondary-700: #0F766E;
+  --secondary-800: #115E59;
+  --secondary-900: #134E4A;
+
+  /* Neutral Slate */
+  --slate-50: #F8FAFC;
+  --slate-100: #F1F5F9;
+  --slate-200: #E2E8F0;
+  --slate-300: #CBD5E1;
+  --slate-400: #94A3B8;
+  --slate-500: #64748B;
+  --slate-600: #475569;
+  --slate-700: #334155;
+  --slate-800: #1E293B;
+  --slate-900: #0F172A;
+
+  /* Semantic Colors */
+  --success: #22C55E;
+  --warning: #F59E0B;
+  --error: #EF4444;
+  --info: #3B82F6;
+
+  /* Backgrounds */
+  --bg-primary: #FFFFFF;
+  --bg-secondary: #F8FAFC;
+  --bg-tertiary: #F1F5F9;
+  --bg-overlay: rgba(15, 23, 42, 0.7);
+
+  /* Text */
+  --text-primary: #1E293B;
+  --text-secondary: #64748B;
+  --text-muted: #94A3B8;
+  --text-inverse: #FFFFFF;
+
+  /* Borders */
+  --border-primary: #E2E8F0;
+  --border-secondary: #CBD5E1;
+}
+
+/* Dark Mode (Future) */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: #0F172A;
+    --bg-secondary: #1E293B;
+    --bg-tertiary: #334155;
+    --text-primary: #F1F5F9;
+    --text-secondary: #CBD5E1;
+    --text-muted: #94A3B8;
+    --bg-overlay: rgba(255, 255, 255, 0.1);
+  }
+}

@@ -4,6 +4,149 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.5] - 2026-04-11
+
+### 🐛 Bug Fixes
+
+#### Runtime Import Stability (`tests.config`)
+- Restored runtime compatibility for modules importing `tests.config` by re-exporting main settings from `config.py` and preserving optional `TEST_*` overrides.
+- Added package marker to make `tests` importable in all runtime contexts.
+- Updated files:
+  - `tests/config.py`
+  - `tests/__init__.py`
+
+#### Frontend Package Recovery (NPM JSON Parse)
+- Fixed invalid JSON in frontend package manifest by resolving leftover merge conflict markers.
+- Updated file:
+  - `react-frontend/package.json`
+
+#### Tailwind/PostCSS Startup Recovery
+- Verified and restored frontend dependencies so PostCSS can resolve `tailwindcss` correctly.
+- Confirmed Vite dev server starts after reinstall (`npm install` in `react-frontend/`).
+
+### 📚 Documentation Updates
+- Added Whisper local model setup + verification step to root quick start flow.
+- Updated file:
+  - `README.md`
+
+## [2.3.4] - 2026-04-10
+
+### ✨ Feature Repairs
+
+#### Chat Voice Input Restored (React)
+- Rewired microphone flow in chat so voice input now works end-to-end:
+  - Start/stop recording via browser `MediaRecorder`
+  - Upload recorded blob to `/api/chat/audio`
+  - Display `transcribed_text` as the user turn, then show RAG response
+- Updated files:
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatInputArea.jsx`
+
+#### Typing Suggestions Restored (React)
+- Replaced hardcoded suggestions with live API-backed suggestions from `/api/suggestions`.
+- Added debounced fetch + merged `recent`, `popular`, and `preset` suggestions in the chat input dropdown.
+
+#### Role-Gated Announcement Typing Hint
+- Added `@Announcement` command hint only for `admin` and `faculty` users in typing suggestions.
+- Students no longer see the command suggestion in UI (backend role enforcement remains unchanged).
+
+### 📚 Documentation Updates
+- Updated voice guide and API endpoints reference for:
+  - `/api/chat/audio`
+  - `/api/suggestions`
+  - frontend role-based announcement typing hints
+- Updated files:
+  - `docs/Voice_to_Text_Implementation_Guide.md`
+  - `docs/04-API_ENDPOINTS.md`
+
+## [2.3.3] - 2026-04-09
+
+### 🐛 Bug Fixes
+
+#### Java Startup Reliability (Windows Launchers)
+- Updated startup scripts to resolve and validate `JAVA_HOME` before starting Spring Boot:
+  - `start-all-servers.bat`
+  - `start-all-servers.ps1`
+- Launchers now fail early with a clear message when JDK 17+ is unavailable or `JAVA_HOME` is invalid.
+- Spring Boot startup now uses Maven wrapper with resolved `JAVA_HOME` to avoid environment mismatch errors.
+
+### 🎨 UI Improvements
+
+#### Exact Logo Override Path (React)
+- Chat UI now supports runtime override image at:
+  - `react-frontend/public/astrobot-logo.png`
+- If override file is absent, UI falls back to existing bundled SVG logo.
+- Applied in:
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatSidebar.jsx`
+  - `react-frontend/src/components/chat/BotMessage.jsx`
+
+## [2.3.2] - 2026-04-09
+
+### 🎨 UI Improvements
+
+#### Chat Workspace and Announcements UX Polish (React)
+- Added a dedicated announcements workspace view with Discord-style section switching in chat sidebar.
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatSidebar.jsx`
+- Clicking an announcement now opens full announcement details in the main panel.
+- Added AstroBot logo placements across chat surfaces for consistent visual identity:
+  - Sidebar header
+  - Chat workspace header
+  - Welcome card chip
+  - Bot message avatar
+  - `react-frontend/src/assets/astrobot-logo.svg` (new)
+- Improved message/input readability and contrast for better usability:
+  - `react-frontend/src/components/chat/BotMessage.jsx`
+  - `react-frontend/src/components/chat/UserMessage.jsx`
+  - `react-frontend/src/components/chat/ChatInputArea.jsx`
+- Refined chat/announcement tab behavior so switching tabs does not reset active chat history.
+
+### ✅ Compatibility
+- No backend endpoint changes.
+- No API contract changes.
+
+## [2.3.1] - 2026-04-09
+
+### 🎨 UI Improvements
+
+#### Admin Console Redesign Completed (React)
+- Fully redesigned admin pages with consistent responsive glass-dashboard UI while preserving API-backed behavior:
+  - `react-frontend/src/pages/admin/DocumentsPage.jsx`
+  - `react-frontend/src/pages/admin/AnalyticsPage.jsx`
+  - `react-frontend/src/pages/admin/UsersPage.jsx`
+  - `react-frontend/src/pages/admin/SettingsPage.jsx`
+  - `react-frontend/src/pages/admin/HealthPage.jsx`
+  - `react-frontend/src/pages/admin/MemoryPage.jsx`
+  - `react-frontend/src/pages/admin/RateLimitingPage.jsx`
+- No admin API contract changes were introduced; redesign is presentation/UX-focused and retains existing endpoint integrations.
+
+### 🐛 Bug Fixes
+
+#### Duplicate Document Stats Route Consolidation
+- `api_server.py`: Removed duplicate definitions of `GET /api/documents/stats` and consolidated into one canonical handler.
+- Preserved alias behavior by keeping `GET /api/knowledge-base/stats` mapped to the same canonical implementation.
+- Impact: Prevents route shadowing/ambiguity and ensures stable stats responses across clients.
+
+---
+
+## [2.3.0] - 2026-04-06
+
+### ✨ New Features
+
+#### Announcement Deletion & System Prompt Customizer
+- **Announcement Deletion**:
+  - Implemented `DELETE /api/announcements/{id}` endpoint to allow removal of announcements.
+  - Authorized securely using `X-User-ID` and `X-User-Role` headers: Users with the `admin` role can delete any announcement, while standard/faculty users can only delete announcements they authored themselves.
+  - UI added to the **React frontend** displaying a persistent delete confirmation flow natively inside the announcement pane.
+- **Dynamic System Prompt Editor**:
+  - Exchanged hardcoded `SYSTEM_PROMPT` in `config.py` for `.env`-driven dynamic configuration.
+  - Modified the **AI Settings Admin page** in the React application to include a multiline text editor area, letting Admins freely tune the assistant's tone and context logic on the fly. 
+- **Announcement Repetition Bug Fix**:
+  - Resolved an issue where successive `@Announcement` queries returned identical cached iterations. Now completely bypasses the `ChromaDB` conversation memory system guaranteeing fresh results each generation.
+
+---
+
 ## [2.2.0] - 2026-04-04
 
 ### ✨ New Features

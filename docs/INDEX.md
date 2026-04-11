@@ -43,6 +43,12 @@
 | [development/ADDING_PROVIDERS.md](development/ADDING_PROVIDERS.md) | Add new LLM | 15 min |
 | [development/PERFORMANCE_OPTIMIZATION.md](development/PERFORMANCE_OPTIMIZATION.md) | Performance tuning | 15 min |
 
+### 🎯 **For Project Status & Roadmap**
+
+| Document | Purpose | Time |
+|----------|---------|------|
+| [IMPROVEMENTS_NEEDED.md](IMPROVEMENTS_NEEDED.md) | Gaps, roadmap & next steps | 30 min |
+
 ---
 
 ## 🎯 By Learning Path
@@ -144,6 +150,7 @@ RESULT: Know how to optimize!
 | learn feature development | [development/DEVELOPMENT_GUIDE.md](development/DEVELOPMENT_GUIDE.md) | Entire document |
 | get quick commands | [guides/QUICKREF.md](guides/QUICKREF.md) | Command sections |
 | work step-by-step as AI | [COPILOT_GUIDE.md](COPILOT_GUIDE.md) | Entire document |
+| see project roadmap and gaps | [IMPROVEMENTS_NEEDED.md](IMPROVEMENTS_NEEDED.md) | Entire document |
 
 ---
 
@@ -155,6 +162,7 @@ docs/
 ├── START_HERE.md ....................... intro (read first)
 ├── COPILOT_GUIDE.md .................... AI workflow
 ├── INDEX.md (you are here)
+├── IMPROVEMENTS_NEEDED.md .............. gaps & roadmap
 │
 ├── guides/
 │   ├── QUICKSTART.md ................... 5-min setup

@@ -54,7 +54,7 @@ from database.db import (
     get_all_rate_limits, get_rate_limit, update_rate_limit, toggle_rate_limit, reset_rate_limits_to_default,
     get_suggestions, create_announcement, get_recent_announcements,
 )
-from config import (
+from tests.config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
     CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED,
 )
@@ -191,6 +191,7 @@ class ProviderSettingsRequest(BaseModel):
     gemini_model: Optional[str] = None
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
+    system_prompt: Optional[str] = None
 
 
 # ═══════════════════════════════════════════════════════
@@ -233,6 +234,25 @@ def api_list_announcements(limit: int = 50):
     """Get the recent announcements feed."""
     return get_recent_announcements(limit)
 
+
+@app.delete("/api/announcements/{announcement_id}")
+def api_delete_announcement(announcement_id: str, request: Request):
+    """Delete an announcement. Admins can delete any; authors can delete their own."""
+    from database.db import delete_announcement
+    
+    user_id = request.headers.get("X-User-ID", "")
+    user_role = request.headers.get("X-User-Role", "")
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID required")
+    
+    success = delete_announcement(announcement_id, user_id, user_role)
+    if not success:
+        raise HTTPException(status_code=404, detail="Announcement not found or you don't have permission to delete it")
+    
+    logger.info(f"Announcement {announcement_id} deleted by user {user_id}")
+    return {"message": "Announcement deleted", "id": announcement_id}
+
 @app.post("/api/chat", response_model=ChatResponse)
 @limiter.limit("5/minute")  # Expensive LLM operation - strict limit
 def api_chat(req: ChatRequest, request: Request):
@@ -252,11 +272,25 @@ def api_chat(req: ChatRequest, request: Request):
         if not user_row or user_row['role'] not in ('admin', 'faculty'):
             raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
             
-        # Bypass RAG, just use LLM to format
-        prompt = f"You are an institutional announcer. Please format the following raw text into a professional, clear, and engaging announcement with suitable emojis. Do not add conversational filler, just output the announcement text.\n\nRaw text: {req.query[13:].strip()}"
+        # Bypass RAG AND memory cache — call LLM directly so each announcement is unique
+        from rag.providers.manager import get_manager
+        from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
         
-        gen_result = generate_response(prompt, context="", user_id=req.user_id)
-        formatted_announcement = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+        raw_text = req.query[13:].strip()
+        announcement_prompt = (
+            "You are an institutional announcer. Please format the following raw text "
+            "into a professional, clear, and engaging announcement with suitable emojis. "
+            "Do not add conversational filler, just output the announcement text.\n\n"
+            f"Raw text: {raw_text}"
+        )
+        
+        mgr = get_manager()
+        formatted_announcement = mgr.generate(
+            system_prompt=SYSTEM_PROMPT,
+            user_message=announcement_prompt,
+            temperature=MODEL_TEMPERATURE,
+            max_tokens=MODEL_MAX_TOKENS,
+        )
         
         if not formatted_announcement:
             formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
@@ -581,6 +615,7 @@ def api_delete_document(doc_id: str):
 
 
 @app.get("/api/documents/stats")
+@app.get("/api/knowledge-base/stats")
 def api_documents_stats():
     """Get knowledge base statistics (total chunks indexed)."""
     from ingestion.embedder import get_collection_stats
@@ -919,7 +954,7 @@ def api_provider_statuses():
 @app.get("/api/settings")
 def api_get_settings():
     """Get current AI settings (reads live values from os.environ)."""
-    import config
+    import tests.config as config
     return {
         "llm_mode": config.LLM_MODE,
         "primary_provider": config.LLM_PRIMARY_PROVIDER,
@@ -955,6 +990,7 @@ def api_update_settings(req: ProviderSettingsRequest):
         "gemini_model": "GEMINI_MODEL",
         "temperature": "MODEL_TEMPERATURE",
         "max_tokens": "MODEL_MAX_TOKENS",
+        "system_prompt": "SYSTEM_PROMPT",
     }
 
     updated = []
@@ -1003,14 +1039,6 @@ def api_test_provider(provider: str):
         raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
 
-@app.get("/api/documents/stats")
-@app.get("/api/knowledge-base/stats")
-def api_knowledge_base_stats():
-    """Get vector DB collection stats."""
-    from ingestion.embedder import get_collection_stats
-    return get_collection_stats()
-
-
 # ── Helper: update .env file ──
 
 def _update_env_var(key: str, value: str):
@@ -1044,7 +1072,7 @@ def _update_env_var(key: str, value: str):
 def _reload_config_module():
     """Force-reload config.py so module-level variables pick up new os.environ values."""
     import importlib
-    import config
+    import tests.config as config
     importlib.reload(config)
 
 
@@ -1169,11 +1197,6 @@ def api_reset_rate_limits(request: Request):
 
     logger.warning(f"Rate limits reset to default by {get_user_id(request)}")
     return {"reset": True, "message": "All rate limits have been reset to default values"}
-
-@app.get("/api/documents/stats")  # ← ADD THIS
-def api_documents_stats():
-    from ingestion.embedder import get_collection_stats
-    return get_collection_stats()
 
 # ═══════════════════════════════════════════════════════
 # ENTRY POINT

@@ -19,7 +19,7 @@ export const register = (username, password, role, fullName) =>
 
 // ── Chat ──
 export const sendChat = (query, userId, username) =>
-  api.post('/chat', { query, userId, username });
+  api.post('/chat', { query, userId, user_id: userId, username });
 
 export const sendAudioMessage = (audioBlob, userId, username) => {
   const formData = new FormData();
@@ -33,6 +33,9 @@ export const getChatStatus = () => api.get('/chat/status');
 
 // ── Announcements ──
 export const getAnnouncements = (limit = 50) => api.get('/announcements', { params: { limit } });
+
+export const deleteAnnouncement = (id, userId, userRole) =>
+  api.delete(`/announcements/${id}`, { headers: { 'X-User-ID': userId, 'X-User-Role': userRole } });
 
 // ── Suggestions / Autocomplete ──
 export const getSuggestions = (query, userId) =>

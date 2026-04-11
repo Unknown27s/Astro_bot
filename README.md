@@ -197,6 +197,39 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Step 3.5: Setup Whisper Voice-to-Text (Optional)
+
+🎙️ To enable voice-to-text functionality, download the Whisper model:
+
+**Prerequisites:**
+- ✅ ffmpeg (will be installed automatically if using Windows)
+- ✅ Python packages already installed from Step 3
+
+**Download the model:**
+
+```bash
+# Windows
+python download_whisper_model.py
+
+# macOS/Linux
+python3 download_whisper_model.py
+```
+
+This will download the `whisper-base-en` model (~500MB) to `models/whisper-base-en/` for fast, offline voice transcription.
+
+**Verify installation:**
+```bash
+# Windows
+python test_load_whisper.py
+
+# macOS/Linux
+python3 test_load_whisper.py
+```
+
+Expected output: ✅ `SUCCESS: Model loaded correctly!`
+
+---
+
 ### Step 4: Configure Environment
 
 ```bash

@@ -61,12 +61,14 @@ TOP_K_RESULTS = 5
 # ── Supported file types ──
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".xlsx", ".csv", ".pptx", ".html", ".htm"}
 
-# ── System Prompt ──
-SYSTEM_PROMPT = """You are IMS AstroBot, a helpful and accurate academic assistant for an institutional management system. 
+# ── System Prompt (editable from Admin AI Settings) ──
+_DEFAULT_SYSTEM_PROMPT = """You are IMS AstroBot, a helpful and accurate academic assistant for an institutional management system. 
 You answer questions based ONLY on the provided institutional documents and context.
 If the context does not contain enough information to answer the question, say so clearly.
 Do not make up information. Always be concise, professional, and helpful.
 If citing specific regulations or policies, mention the source document when possible."""
+
+SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 
 # ── Conversation Memory (Semantic Cache) ──
 # Enable/disable memory feature

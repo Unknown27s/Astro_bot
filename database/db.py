@@ -972,5 +972,34 @@ def get_recent_announcements(limit: int = 50) -> list[dict]:
     finally:
         conn.close()
 
+
+def delete_announcement(announcement_id: str, requesting_user_id: str, requesting_user_role: str) -> bool:
+    """Delete an announcement. Admins can delete any; authors can delete their own.
+    
+    Returns True if deleted, False if not found or unauthorized.
+    """
+    conn = get_connection()
+    try:
+        ann = conn.execute(
+            "SELECT id, user_id FROM announcements WHERE id = ?",
+            (announcement_id,)
+        ).fetchone()
+        
+        if not ann:
+            return False
+        
+        # Authorization: admin can delete any, author can delete own
+        is_admin = requesting_user_role == 'admin'
+        is_author = ann['user_id'] == requesting_user_id
+        
+        if not is_admin and not is_author:
+            return False
+        
+        conn.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
 # Initialize on import
 init_db()

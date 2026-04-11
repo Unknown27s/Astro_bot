@@ -13,9 +13,11 @@
 3. [Classification](#classification)
 4. [Search & Filtering](#search--filtering)
 5. [Announcements](#announcements)
-6. [Rate Limits](#rate-limits)
-7. [Error Responses](#error-responses)
-8. [Examples](#examples)
+6. [Voice Chat](#voice-chat)
+7. [Suggestions](#suggestions)
+8. [Rate Limits](#rate-limits)
+9. [Error Responses](#error-responses)
+10. [Examples](#examples)
 
 ---
 
@@ -507,6 +509,96 @@ curl http://localhost:8000/api/announcements | jq
 }
 ```
 *HTTP 403 Forbidden*
+
+---
+
+### Delete Announcement
+
+**Endpoint:** `DELETE /api/announcements/{id}`
+
+**Rate Limit:** 30 requests/minute (using general write endpoint limits)
+
+**Headers:**
+- `X-User-ID` (string, required): The ID of the requesting user.
+- `X-User-Role` (string, required): The role of the requesting user (`admin`, `faculty`, `student`).
+
+**Response:** 200 OK
+```json
+{
+  "message": "Announcement deleted",
+  "id": "ann-12345"
+}
+```
+
+**Response (Unauthorized or Not Found):** 404 Not Found
+*Note: The API deliberately obscures whether an announcement doesn't exist vs the user not having permission to prevent ID harvesting.*
+```json
+{
+  "detail": "Announcement not found or you don't have permission to delete it"
+}
+```
+
+### Frontend Role Hint Behavior
+
+- Typing suggestion for `@Announcement` is shown only to `admin` and `faculty` users in the React chat UI.
+- Students do not see the `@Announcement` command hint and receive HTTP 403 if they try to post one manually.
+
+---
+
+## Voice Chat
+
+### Send Voice Query
+
+**Endpoint:** `POST /api/chat/audio`
+
+**Access:** All authenticated users
+
+**Content-Type:** `multipart/form-data`
+
+**Form Fields:**
+- `audio` (file, required): Browser-recorded audio blob (`webm` recommended)
+- `user_id` (string, required)
+- `username` (string, required)
+
+**Response:** `200 OK`
+```json
+{
+  "response": "Attendance policy requires 75% minimum attendance...",
+  "sources": [],
+  "citations": "",
+  "response_time_ms": 1042.1,
+  "transcribed_text": "What is the attendance policy"
+}
+```
+
+---
+
+## Suggestions
+
+### Get Typing Suggestions
+
+**Endpoint:** `GET /api/suggestions`
+
+**Access:** All authenticated users
+
+**Query Parameters:**
+- `q` (string, optional): Current typed input
+- `user_id` (string, optional): Used for personalized recent history suggestions
+
+**Response:** `200 OK`
+```json
+{
+  "recent": [
+    "What are the exam rules?"
+  ],
+  "popular": [
+    "What is the fee structure?"
+  ],
+  "preset": [
+    "What are the admission requirements?"
+  ]
+}
+```
 
 ---
 

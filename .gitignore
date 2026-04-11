@@ -102,6 +102,10 @@ whisper_cache/
 # Whisper model downloads (faster-whisper / huggingface cache)
 models/whisper*/
 models/Systran/
+models/models--*/
+models/**/blobs/
+models/**/refs/
+models/**/snapshots/
 faster-whisper-*/
 ggml-*.bin
 

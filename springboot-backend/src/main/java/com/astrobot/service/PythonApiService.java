@@ -8,7 +8,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
-import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 import java.util.List;
 import java.util.Map;
@@ -93,6 +92,17 @@ public class PythonApiService {
                 .uri(uriBuilder -> uriBuilder.path("/api/announcements").queryParam("limit", limit).build())
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> deleteAnnouncement(String announcementId, String userId, String userRole) {
+        return client.delete()
+                .uri("/api/announcements/{id}", announcementId)
+                .header("X-User-ID", userId)
+                .header("X-User-Role", userRole)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
                 })
                 .block();
     }

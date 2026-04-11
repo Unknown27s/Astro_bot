@@ -92,6 +92,7 @@ Also see: [WORKFLOW.md](./contribution/WORKFLOW.md) - Quick checklist for featur
 2. Read: [COPILOT_GUIDE.md](./COPILOT_GUIDE.md) - Development workflow
 3. Review: [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md)
 4. Explore: [04-API_ENDPOINTS.md](./04-API_ENDPOINTS.md)
+5. Check: [IMPROVEMENTS_NEEDED.md](./IMPROVEMENTS_NEEDED.md) - What needs work next
 
 ---
 
@@ -106,6 +107,7 @@ docs/
 ├── COPILOT_GUIDE.md          # AI agent/developer workflow
 ├── START_HERE.md             # Quick project overview
 ├── INDEX.md                  # Documentation index
+├── IMPROVEMENTS_NEEDED.md    # Roadmap & next steps (NEW!)
 ├── README.md                 # This file
 │
 ├── architecture/

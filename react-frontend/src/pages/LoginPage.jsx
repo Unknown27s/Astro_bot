@@ -1,132 +1,127 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
+import toast from 'react-hot-toast';
+import { Bot } from 'lucide-react';
+import BrandingSection from '../components/auth/BrandingSection';
+import LoginForm from '../components/auth/LoginForm';
+import RegisterForm from '../components/auth/RegisterForm';
 import { useAuth } from '../context/AuthContext';
 import { login, register } from '../services/api';
-import toast from 'react-hot-toast';
 
 export default function LoginPage() {
-  const [mode, setMode] = useState('login'); // login | register
-  const [loginType, setLoginType] = useState('student'); // student | admin
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [fullName, setFullName] = useState('');
-  const [role, setRole] = useState('student');
-  const [loading, setLoading] = useState(false);
-  const { loginUser } = useAuth();
   const navigate = useNavigate();
+  const { loginUser } = useAuth();
+  const [mode, setMode] = useState('login');
+  const [loading, setLoading] = useState(false);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    if (!username || !password) return toast.error('Fill in all fields');
+  const handleLogin = async (data) => {
     setLoading(true);
     try {
-      const { data } = await login(username, password);
-      if (loginType === 'admin' && data.role !== 'admin') {
-        toast.error('This account is not an administrator');
-        setLoading(false);
-        return;
-      }
-      if (loginType === 'student' && data.role === 'admin') {
-        toast.error('Admin accounts should use Admin Login');
-        setLoading(false);
-        return;
-      }
-      loginUser(data);
-      toast.success(`Welcome, ${data.username}!`);
-      navigate(data.role === 'admin' ? '/admin/documents' : '/chat');
-    } catch {
-      toast.error('Invalid username or password');
+      const response = await login(data.username, data.password);
+      const userData = response.data;
+
+      // Store user in AuthContext
+      loginUser({
+        id: userData.id,
+        username: userData.username,
+        role: userData.role,
+        fullName: userData.fullName || userData.full_name,
+      });
+
+      toast.success('Login successful!');
+      navigate(userData.role === 'admin' ? '/admin/documents' : '/chat');
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail || error.message || 'Invalid credentials';
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
   };
 
-  const handleRegister = async (e) => {
-    e.preventDefault();
-    if (!username || !password || !fullName) return toast.error('Fill in all fields');
+  const handleRegister = async (data) => {
     setLoading(true);
     try {
-      await register(username, password, role, fullName);
-      toast.success('Account created! You can now log in.');
+      await register(data.username, data.password, data.role, data.fullName);
+
+      toast.success('Registration successful! Please login.');
       setMode('login');
-    } catch {
-      toast.error('Username already taken');
+    } catch (error) {
+      const errorMsg = error.response?.data?.detail || error.message || 'Registration failed';
+      toast.error(errorMsg);
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <div style={{ width: '100%', maxWidth: 420 }}>
-        <div className="text-center" style={{ marginBottom: 32 }}>
-          <h1 style={{ fontSize: 36 }}>🤖 IMS AstroBot</h1>
-          <p className="text-muted">Institutional AI Assistant — Powered by RAG</p>
-        </div>
+    <div className="relative flex min-h-screen flex-col items-center justify-center overflow-hidden bg-[#f7f9fb] text-[#191c1e]">
+      <div className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-1/2 h-[40rem] w-[40rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#07376a]/10" />
+        <div className="absolute left-1/2 top-1/2 h-[60rem] w-[60rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#07376a]/7" />
+        <div className="absolute left-1/2 top-1/2 h-[80rem] w-[80rem] -translate-x-1/2 -translate-y-1/2 rounded-full border border-[#07376a]/5" />
+        <div className="absolute inset-0 bg-gradient-to-tr from-[#f2f4f6] via-[#f7f9fb] to-white/90" />
+      </div>
 
-        {mode === 'login' ? (
-          <div className="card">
-            <div className="flex gap-2" style={{ marginBottom: 16 }}>
-              <button
-                className={`btn btn-block ${loginType === 'student' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setLoginType('student')}
-              >🎓 Student / Faculty</button>
-              <button
-                className={`btn btn-block ${loginType === 'admin' ? 'btn-primary' : 'btn-ghost'}`}
-                onClick={() => setLoginType('admin')}
-              >🔑 Admin</button>
-            </div>
-            <form onSubmit={handleLogin} className="flex flex-col gap-3">
-              <div>
-                <label>Username</label>
-                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Enter username" />
-              </div>
-              <div>
-                <label>Password</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Enter password" />
-              </div>
-              <button className="btn btn-primary btn-block" disabled={loading}>
-                {loading ? <span className="spinner" /> : 'Login'}
-              </button>
-            </form>
-            {loginType === 'student' && (
-              <p className="text-center text-sm text-muted" style={{ marginTop: 12 }}>
-                Don't have an account? <a href="#" onClick={(e) => { e.preventDefault(); setMode('register'); }}>Register</a>
-              </p>
-            )}
+      <main className="relative z-10 w-full max-w-md px-6 py-10">
+        <BrandingSection />
+
+        <motion.section
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.35 }}
+          className="mt-8 rounded-xl border border-white/60 bg-white/30 p-6 shadow-[0_32px_64px_-16px_rgba(7,55,106,0.08)] backdrop-blur-2xl"
+        >
+          <div className="mb-6 flex justify-between gap-2">
+            <button
+              onClick={() => setMode('login')}
+              type="button"
+              className={`w-full rounded-full px-4 py-2.5 text-sm font-bold transition ${mode === 'login'
+                ? 'bg-[#d5e3ff] text-[#07376a] ring-1 ring-[#07376a]/20'
+                : 'text-[#737783] hover:bg-white/60'
+                }`}
+            >
+              Sign In
+            </button>
+            <button
+              onClick={() => setMode('register')}
+              type="button"
+              className={`w-full rounded-full px-4 py-2.5 text-sm font-bold transition ${mode === 'register'
+                ? 'bg-[#d5e3ff] text-[#07376a] ring-1 ring-[#07376a]/20'
+                : 'text-[#737783] hover:bg-white/60'
+                }`}
+            >
+              Create Account
+            </button>
           </div>
-        ) : (
-          <div className="card">
-            <h3 style={{ marginBottom: 16 }}>📝 Create Account</h3>
-            <form onSubmit={handleRegister} className="flex flex-col gap-3">
-              <div>
-                <label>Full Name</label>
-                <input value={fullName} onChange={e => setFullName(e.target.value)} placeholder="Enter your full name" />
-              </div>
-              <div>
-                <label>Username</label>
-                <input value={username} onChange={e => setUsername(e.target.value)} placeholder="Choose a username" />
-              </div>
-              <div>
-                <label>Password</label>
-                <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Choose a password" />
-              </div>
-              <div>
-                <label>Role</label>
-                <select value={role} onChange={e => setRole(e.target.value)}>
-                  <option value="student">Student</option>
-                  <option value="faculty">Faculty</option>
-                </select>
-              </div>
-              <button className="btn btn-primary btn-block" disabled={loading}>
-                {loading ? <span className="spinner" /> : 'Register'}
-              </button>
-            </form>
-            <p className="text-center text-sm text-muted" style={{ marginTop: 12 }}>
-              Already have an account? <a href="#" onClick={(e) => { e.preventDefault(); setMode('login'); }}>Login</a>
-            </p>
+
+          {mode === 'login' ? (
+            <LoginForm onSubmit={handleLogin} loading={loading} onSwitchMode={() => setMode('register')} />
+          ) : (
+            <RegisterForm onSubmit={handleRegister} loading={loading} onSwitchMode={() => setMode('login')} />
+          )}
+        </motion.section>
+
+        <p className="mt-8 text-center text-sm font-medium text-[#505f76]">
+          Secure Gateway for Rajalakshmi Institute of Technology
+        </p>
+      </main>
+
+      <footer className="relative z-10 mt-auto w-full max-w-7xl px-8 py-7">
+        <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
+          <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-500 md:text-left">
+            © 2026 Rajalakshmi Institute of Technology. All rights reserved.
+          </p>
+          <div className="flex gap-5">
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Privacy Policy</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Terms of Service</span>
+            <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Help Center</span>
           </div>
-        )}
+        </div>
+      </footer>
+
+      <div className="pointer-events-none fixed bottom-10 right-10 hidden opacity-10 lg:block">
+        <Bot size={170} className="text-[#07376a]" />
       </div>
     </div>
   );

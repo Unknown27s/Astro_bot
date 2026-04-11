@@ -62,6 +62,61 @@ rm -r data/chroma_db
 
 ## Runtime Issues
 
+### Issue: `ModuleNotFoundError: No module named 'tests.config'`
+
+**Cause:** Python cannot resolve `tests` as an importable package in runtime context.
+
+**Solution:**
+```bash
+# Ensure tests package marker exists
+dir tests\__init__.py
+
+# Install all project dependencies
+pip install -r requirements.txt
+
+# Re-run API
+python api_server.py
+```
+
+**Notes:**
+- Runtime modules currently import from `tests.config` in this codebase.
+- If `tests/config.py` was modified, keep required exported names aligned with runtime imports.
+
+---
+
+### Issue: `Failed to load PostCSS config ... Cannot find module 'tailwindcss'`
+
+**Cause:** Frontend dependencies are missing/out-of-sync in `react-frontend/node_modules`.
+
+**Solution:**
+```bash
+cd react-frontend
+npm install
+npm ls tailwindcss
+npm run dev
+```
+
+**Expected:** `tailwindcss@...` appears in dependency tree and Vite starts.
+
+---
+
+### Issue: `npm ERR! code EJSONPARSE` in `package.json`
+
+**Cause:** Invalid JSON, often unresolved merge conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`).
+
+**Solution:**
+```bash
+cd react-frontend
+npm run dev
+```
+
+If parse error mentions conflict markers:
+1. Open `react-frontend/package.json`
+2. Remove merge markers and keep valid JSON only
+3. Run `npm install` again
+
+---
+
 ### Issue: Embedding model timeout
 
 **Cause:** First-time download of `all-MiniLM-L6-v2` (400+ MB)
