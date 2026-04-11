@@ -4,6 +4,36 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.4] - 2026-04-10
+
+### ✨ Feature Repairs
+
+#### Chat Voice Input Restored (React)
+- Rewired microphone flow in chat so voice input now works end-to-end:
+  - Start/stop recording via browser `MediaRecorder`
+  - Upload recorded blob to `/api/chat/audio`
+  - Display `transcribed_text` as the user turn, then show RAG response
+- Updated files:
+  - `react-frontend/src/components/chat/ChatLayout.jsx`
+  - `react-frontend/src/components/chat/ChatInputArea.jsx`
+
+#### Typing Suggestions Restored (React)
+- Replaced hardcoded suggestions with live API-backed suggestions from `/api/suggestions`.
+- Added debounced fetch + merged `recent`, `popular`, and `preset` suggestions in the chat input dropdown.
+
+#### Role-Gated Announcement Typing Hint
+- Added `@Announcement` command hint only for `admin` and `faculty` users in typing suggestions.
+- Students no longer see the command suggestion in UI (backend role enforcement remains unchanged).
+
+### 📚 Documentation Updates
+- Updated voice guide and API endpoints reference for:
+  - `/api/chat/audio`
+  - `/api/suggestions`
+  - frontend role-based announcement typing hints
+- Updated files:
+  - `docs/Voice_to_Text_Implementation_Guide.md`
+  - `docs/04-API_ENDPOINTS.md`
+
 ## [2.3.3] - 2026-04-09
 
 ### 🐛 Bug Fixes

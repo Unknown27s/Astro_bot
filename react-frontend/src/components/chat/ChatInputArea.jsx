@@ -5,19 +5,34 @@ import { motion, AnimatePresence } from 'framer-motion';
 export default function ChatInputArea({
   onSendMessage,
   onRecordVoice,
+  onInputChange,
   loading = false,
+  recording = false,
+  inputValue,
   suggestions = [],
 }) {
-  const [message, setMessage] = useState('');
+  const [internalMessage, setInternalMessage] = useState('');
   const [showSuggestions, setShowSuggestions] = useState(false);
   const inputRef = useRef(null);
   const suggestionsRef = useRef(null);
   const voiceEnabled = typeof onRecordVoice === 'function';
+  const isControlled = typeof inputValue === 'string';
+  const message = isControlled ? inputValue : internalMessage;
+
+  const updateMessage = (nextValue) => {
+    if (isControlled) {
+      onInputChange?.(nextValue);
+      return;
+    }
+
+    setInternalMessage(nextValue);
+    onInputChange?.(nextValue);
+  };
 
   const handleSendMessage = () => {
     if (message.trim()) {
       onSendMessage(message);
-      setMessage('');
+      updateMessage('');
       setShowSuggestions(false);
     }
   };
@@ -30,7 +45,7 @@ export default function ChatInputArea({
   };
 
   const handleSuggestionClick = (text) => {
-    setMessage(text);
+    updateMessage(text);
     setShowSuggestions(false);
     inputRef.current?.focus();
   };
@@ -87,13 +102,13 @@ export default function ChatInputArea({
             ref={inputRef}
             value={message}
             onChange={(e) => {
-              setMessage(e.target.value);
+              updateMessage(e.target.value);
               setShowSuggestions(e.target.value.length > 0);
             }}
             onFocus={() => message.length > 0 && setShowSuggestions(true)}
             onKeyDown={handleKeyPress}
             placeholder="Ask me anything about the college..."
-            disabled={loading}
+            disabled={loading || recording}
             className="w-full resize-none rounded-xl border border-white/25 bg-black/35 px-4 py-3 text-slate-50 placeholder-slate-200/90 transition-all duration-200 focus:border-cyan-300/80 focus:outline-none focus:ring-2 focus:ring-cyan-300/35 disabled:opacity-50"
             rows="3"
             maxLength={500}
@@ -110,9 +125,12 @@ export default function ChatInputArea({
             <button
               onClick={() => onRecordVoice?.()}
               type="button"
-              className="rounded-xl border border-white/25 bg-white/10 p-3 text-slate-50 transition-all duration-200 hover:bg-white/15"
-              title="Start voice input"
-              aria-label="Start voice input"
+              disabled={loading}
+              className={`rounded-xl border p-3 text-slate-50 transition-all duration-200 ${recording
+                ? 'border-red-300/70 bg-red-500/30 hover:bg-red-500/35'
+                : 'border-white/25 bg-white/10 hover:bg-white/15'} disabled:cursor-not-allowed disabled:opacity-50`}
+              title={recording ? 'Stop voice input' : 'Start voice input'}
+              aria-label={recording ? 'Stop voice input' : 'Start voice input'}
             >
               <Mic className="h-5 w-5" />
             </button>
@@ -120,7 +138,7 @@ export default function ChatInputArea({
 
           <button
             onClick={handleSendMessage}
-            disabled={!message.trim() || loading}
+            disabled={!message.trim() || loading || recording}
             type="button"
             className="astro-glow-cyan flex items-center justify-center rounded-xl bg-gradient-to-r from-cyan-300 to-blue-500 p-3 text-slate-900 transition-all duration-200 hover:scale-[1.04] active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
             aria-label="Send message"

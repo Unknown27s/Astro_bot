@@ -8,7 +8,7 @@ import ChatInputArea from './ChatInputArea';
 import TypingIndicator from './TypingIndicator';
 import ChatSidebar from './ChatSidebar';
 import { useAuth } from '../../context/AuthContext';
-import { sendChat, getAnnouncements } from '../../services/api';
+import { sendChat, sendAudioMessage, getAnnouncements, getSuggestions } from '../../services/api';
 import chatbotLogo from '../../assets/astrobot-logo.svg';
 
 const CHATBOT_LOGO_URL = '/astrobot-logo.png';
@@ -23,11 +23,50 @@ const getWelcomeMessage = () => ({
 
 const buildId = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 
+const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
+  const items = [];
+  const seen = new Set();
+
+  const appendGroup = (values, category) => {
+    (Array.isArray(values) ? values : []).forEach((value) => {
+      if (typeof value !== 'string') return;
+      const text = value.trim();
+      if (!text) return;
+      const dedupeKey = text.toLowerCase();
+      if (seen.has(dedupeKey)) return;
+      seen.add(dedupeKey);
+      items.push({ text, category });
+    });
+  };
+
+  appendGroup(result?.recent, 'Recent');
+  appendGroup(result?.popular, 'Popular');
+  appendGroup(result?.preset, 'Suggested');
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const showAnnouncementCommand =
+    includeAnnouncementCommand &&
+    normalizedQuery.length > 0 &&
+    (normalizedQuery.startsWith('@') || '@announcement'.startsWith(normalizedQuery) || normalizedQuery.includes('announce'));
+
+  if (showAnnouncementCommand && !seen.has('@announcement')) {
+    items.unshift({
+      text: '@Announcement ',
+      category: 'Faculty/Admin Command',
+    });
+  }
+
+  return items.slice(0, 8);
+};
+
 export default function ChatLayout() {
   const navigate = useNavigate();
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const [messages, setMessages] = useState([getWelcomeMessage()]);
   const [loading, setLoading] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
+  const [inputText, setInputText] = useState('');
+  const [liveSuggestions, setLiveSuggestions] = useState([]);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [conversations, setConversations] = useState([]);
   const [announcements, setAnnouncements] = useState([]);
@@ -36,6 +75,10 @@ export default function ChatLayout() {
   const [currentConversationId, setCurrentConversationId] = useState(null);
   const messagesEndRef = useRef(null);
   const hydratedRef = useRef(false);
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const suggestionsRequestIdRef = useRef(0);
 
   const currentUser = useMemo(() => {
     try {
@@ -43,11 +86,18 @@ export default function ChatLayout() {
       return {
         id: user?.id || 'guest',
         username: user?.username || 'Guest',
+        role: user?.role || 'student',
       };
     } catch {
-      return { id: 'guest', username: 'Guest' };
+      return {
+        id: user?.id || 'guest',
+        username: user?.username || 'Guest',
+        role: user?.role || 'student',
+      };
     }
-  }, []);
+  }, [user]);
+
+  const canUseAnnouncementCommand = currentUser.role === 'admin' || currentUser.role === 'faculty';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -75,6 +125,17 @@ export default function ChatLayout() {
       localStorage.setItem('conversations', JSON.stringify(conversations));
     }
   }, [conversations]);
+
+  useEffect(() => {
+    return () => {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let mounted = true;
@@ -105,8 +166,72 @@ export default function ChatLayout() {
     };
   }, [activeAnnouncementId]);
 
+  useEffect(() => {
+    if (activeView !== 'chat') {
+      setLiveSuggestions([]);
+      return;
+    }
+
+    const query = inputText.trim();
+    if (!query) {
+      setLiveSuggestions([]);
+      return;
+    }
+
+    const requestId = suggestionsRequestIdRef.current + 1;
+    suggestionsRequestIdRef.current = requestId;
+
+    const timer = setTimeout(async () => {
+      try {
+        const result = await getSuggestions(query, currentUser.id);
+        if (requestId !== suggestionsRequestIdRef.current) return;
+        setLiveSuggestions(
+          mergeSuggestionGroups(result.data, canUseAnnouncementCommand, query)
+        );
+      } catch (error) {
+        if (requestId !== suggestionsRequestIdRef.current) return;
+        setLiveSuggestions(mergeSuggestionGroups({}, canUseAnnouncementCommand, query));
+      }
+    }, 220);
+
+    return () => clearTimeout(timer);
+  }, [inputText, activeView, currentUser.id, canUseAnnouncementCommand]);
+
+  const saveConversationTurn = (userMsg, botMsg, conversationTitleSeed) => {
+    if (!currentConversationId) {
+      const newConvId = buildId();
+      const newConv = {
+        id: newConvId,
+        title: conversationTitleSeed.substring(0, 50) + (conversationTitleSeed.length > 50 ? '...' : ''),
+        lastMessage: botMsg.content.substring(0, 100) + (botMsg.content.length > 100 ? '...' : ''),
+        timestamp: new Date().toISOString(),
+        messages: [userMsg, botMsg],
+      };
+      const updatedConvs = [newConv, ...conversations];
+      setConversations(updatedConvs);
+      localStorage.setItem('conversations', JSON.stringify(updatedConvs));
+      setCurrentConversationId(newConvId);
+      return;
+    }
+
+    setConversations((prev) =>
+      prev.map((conv) =>
+        conv.id === currentConversationId
+          ? {
+            ...conv,
+            lastMessage: botMsg.content.substring(0, 100) + (botMsg.content.length > 100 ? '...' : ''),
+            timestamp: new Date().toISOString(),
+            messages: [...(conv.messages || []), userMsg, botMsg],
+          }
+          : conv
+      )
+    );
+  };
+
   const handleSendMessage = async (messageText) => {
     if (!messageText.trim()) return;
+    setInputText('');
+    setLiveSuggestions([]);
 
     // Add user message
     const userMsg = {
@@ -133,6 +258,7 @@ export default function ChatLayout() {
       };
 
       setMessages((prev) => [...prev, botMsg]);
+      saveConversationTurn(userMsg, botMsg, messageText);
 
       // Refresh announcement feed when a new announcement is posted via chat command.
       if (messageText.trim().toLowerCase().startsWith('@announcement')) {
@@ -142,36 +268,6 @@ export default function ChatLayout() {
         } catch {
           // Ignore announcement refresh errors and keep chat flow uninterrupted.
         }
-      }
-
-      // Save conversation to history
-      if (!currentConversationId) {
-        const newConvId = buildId();
-        const newConv = {
-          id: newConvId,
-          title: messageText.substring(0, 50) + (messageText.length > 50 ? '...' : ''),
-          lastMessage: response.data.response.substring(0, 100) + (response.data.response.length > 100 ? '...' : ''),
-          timestamp: new Date().toISOString(),
-          messages: [userMsg, botMsg],
-        };
-        const updatedConvs = [newConv, ...conversations];
-        setConversations(updatedConvs);
-        localStorage.setItem('conversations', JSON.stringify(updatedConvs));
-        setCurrentConversationId(newConvId);
-      } else {
-        // Update existing conversation
-        setConversations((prev) =>
-          prev.map((conv) =>
-            conv.id === currentConversationId
-              ? {
-                ...conv,
-                lastMessage: response.data.response.substring(0, 100) + (response.data.response.length > 100 ? '...' : ''),
-                timestamp: new Date().toISOString(),
-                messages: [...(conv.messages || []), userMsg, botMsg],
-              }
-              : conv
-          )
-        );
       }
     } catch (error) {
       console.error('Error sending message:', error);
@@ -188,6 +284,126 @@ export default function ChatLayout() {
       setMessages((prev) => [...prev, errorMsg]);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleRecordVoice = async () => {
+    if (isRecording) {
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+        mediaRecorderRef.current.stop();
+      }
+      return;
+    }
+
+    if (!navigator.mediaDevices || !window.MediaRecorder) {
+      setMessages((prev) => [...prev, {
+        id: buildId(),
+        type: 'bot',
+        content: 'Voice input is not supported in this browser. Please use a Chromium-based browser and allow microphone access.',
+        sources: [],
+        timestamp: new Date().toISOString(),
+      }]);
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      audioChunksRef.current = [];
+
+      const recorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      recorder.onstop = async () => {
+        setIsRecording(false);
+        const streamRef = mediaStreamRef.current;
+        mediaStreamRef.current = null;
+
+        if (streamRef) {
+          streamRef.getTracks().forEach((track) => track.stop());
+        }
+
+        const mimeType = recorder.mimeType || 'audio/webm';
+        const audioBlob = new Blob(audioChunksRef.current, { type: mimeType });
+        audioChunksRef.current = [];
+
+        if (audioBlob.size === 0) {
+          setMessages((prev) => [...prev, {
+            id: buildId(),
+            type: 'bot',
+            content: 'No audio was captured. Please try recording again.',
+            sources: [],
+            timestamp: new Date().toISOString(),
+          }]);
+          return;
+        }
+
+        setLoading(true);
+        setInputText('');
+        setLiveSuggestions([]);
+
+        try {
+          const response = await sendAudioMessage(audioBlob, currentUser.id, currentUser.username);
+          const transcribedText = response.data.transcribed_text || '[Voice message]';
+
+          const userMsg = {
+            id: buildId(),
+            type: 'user',
+            content: transcribedText,
+            timestamp: new Date().toISOString(),
+          };
+
+          const botMsg = {
+            id: buildId(),
+            type: 'bot',
+            content: response.data.response,
+            sources: response.data.sources || [],
+            citations: response.data.citations || '',
+            timestamp: new Date().toISOString(),
+          };
+
+          setMessages((prev) => [...prev, userMsg, botMsg]);
+          saveConversationTurn(userMsg, botMsg, transcribedText);
+        } catch (error) {
+          console.error('Error sending audio message:', error);
+          setMessages((prev) => [...prev, {
+            id: buildId(),
+            type: 'bot',
+            content: 'Unable to process voice input right now. Please try again or type your question.',
+            sources: [],
+            timestamp: new Date().toISOString(),
+          }]);
+        } finally {
+          setLoading(false);
+        }
+      };
+
+      recorder.onerror = () => {
+        setIsRecording(false);
+        if (mediaStreamRef.current) {
+          mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+          mediaStreamRef.current = null;
+        }
+        audioChunksRef.current = [];
+      };
+
+      recorder.start();
+      setIsRecording(true);
+    } catch (error) {
+      setIsRecording(false);
+      setMessages((prev) => [...prev, {
+        id: buildId(),
+        type: 'bot',
+        content: 'Microphone permission was denied or unavailable. Please allow microphone access and try again.',
+        sources: [],
+        timestamp: new Date().toISOString(),
+      }]);
     }
   };
 
@@ -390,13 +606,12 @@ export default function ChatLayout() {
               <div className="px-3 pb-3 md:px-6 md:pb-5">
                 <ChatInputArea
                   onSendMessage={handleSendMessage}
+                  onRecordVoice={handleRecordVoice}
+                  onInputChange={setInputText}
+                  inputValue={inputText}
                   loading={loading}
-                  suggestions={[
-                    { text: 'What are the placement statistics?', category: 'Placements' },
-                    { text: 'How do I register for events?', category: 'Events' },
-                    { text: 'Where is Building 4 Innovation Lab?', category: 'Campus Guide' },
-                    { text: 'What is the canteen timing?', category: 'Campus Services' },
-                  ]}
+                  recording={isRecording}
+                  suggestions={liveSuggestions}
                 />
               </div>
             </>

@@ -1,5 +1,6 @@
 # IMS AstroBot: Voice-to-Text Implementation Guide
 *Built and Documented on: April 3, 2026*
+*Updated: April 10, 2026*
 
 ## 1. How Our Project Works (High-Level Overview)
 
@@ -47,7 +48,15 @@ sequenceDiagram
 ```
 
 ### Step 1: Frontend Audio Recording
-We added a microphone button to the React UI (`ChatPage.jsx`). When the user clicks the mic, the browser uses the native **Web Audio API** (`MediaRecorder`) to capture their microphone input. When they stop recording, the browser packages the recorded audio into a tiny, compressed `.webm` blob and sends it as `multipart/form-data` to the backend.
+The microphone workflow is implemented in React chat components (`ChatLayout.jsx` + `ChatInputArea.jsx`).
+
+When the user clicks the mic button:
+- The browser uses native **Web Audio API** (`MediaRecorder`) to capture microphone audio.
+- Clicking the mic again stops recording.
+- The recorded blob is packaged as `multipart/form-data` and posted to `/api/chat/audio` through the existing API service layer.
+- The transcribed text is displayed as the user message in chat, followed by the assistant response from the standard RAG pipeline.
+
+The chat input also now uses live API-backed typing suggestions via `/api/suggestions`. The `@Announcement` command hint is shown only for `admin` and `faculty` roles, while students do not see that command hint.
 
 ### Step 2: Spring Boot Proxying
 Since the React app communicates exclusively with the Spring Boot gateway (handling CORS and login validation), we added a new endpoint (`/api/chat/audio`) in `ChatController.java`. Spring Boot receives the audio file and safely proxies it forward to the Python FastAPI backend natively using Spring `WebClient`.
