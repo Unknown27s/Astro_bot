@@ -23,6 +23,7 @@ const navItems = [
   { to: '/admin/settings', icon: Settings, label: 'AI Settings' },
   { to: '/admin/rate-limiting', icon: Zap, label: 'Rate Limiting' },
   { to: '/admin/memory', icon: Database, label: 'Memory' },
+  { to: '/admin/trace-monitor', icon: Activity, label: 'Trace Monitor' },
   { to: '/admin/health', icon: Activity, label: 'Health' },
   { to: '/admin/chat', icon: MessageSquare, label: 'Test Chat' },
 ];

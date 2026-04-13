@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAnalytics, getQueryLogs } from '../../services/api';
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 
 export default function AnalyticsPage() {
   const [analytics, setAnalytics] = useState(null);
@@ -62,6 +62,19 @@ export default function AnalyticsPage() {
     : [];
 
   const topUsers = Array.isArray(analytics.top_users) ? analytics.top_users : [];
+  const feedbackData = Array.isArray(analytics.daily_feedback)
+    ? analytics.daily_feedback.map((item) => ({
+      date: item.day ?? item.date,
+      helpful: item.helpful ?? 0,
+      notHelpful: item.not_helpful ?? 0,
+      total: item.total ?? 0,
+    }))
+    : [];
+
+  const totalFeedback = analytics.total_feedback ?? 0;
+  const helpfulFeedback = analytics.helpful_feedback ?? 0;
+  const notHelpfulFeedback = analytics.not_helpful_feedback ?? 0;
+  const helpfulRate = analytics.helpful_feedback_rate ?? 0;
 
   return (
     <div className="space-y-6">
@@ -70,7 +83,7 @@ export default function AnalyticsPage() {
         <p className="text-sm text-slate-300/85">Live platform metrics from analytics and query-log APIs.</p>
       </div>
 
-      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      <section className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <div className="astro-glass rounded-xl border border-white/10 p-4">
           <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Total Queries</p>
           <p className="mt-1 text-2xl font-bold text-white">{analytics.total_queries ?? 0}</p>
@@ -87,6 +100,48 @@ export default function AnalyticsPage() {
           <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Avg Response</p>
           <p className="mt-1 text-2xl font-bold text-white">{analytics.avg_response_ms ?? 0} ms</p>
         </div>
+        <div className="astro-glass rounded-xl border border-white/10 p-4">
+          <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Total Feedback</p>
+          <p className="mt-1 text-2xl font-bold text-white">{totalFeedback}</p>
+        </div>
+        <div className="astro-glass rounded-xl border border-white/10 p-4">
+          <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Helpful Rate</p>
+          <p className="mt-1 text-2xl font-bold text-white">{helpfulRate}%</p>
+        </div>
+      </section>
+
+      <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="text-lg font-semibold text-white">Feedback Quality Trend (Last 14 Days)</h3>
+          <div className="flex gap-2 text-xs">
+            <span className="rounded-full border border-emerald-300/20 bg-emerald-400/10 px-2.5 py-1 text-emerald-100">
+              Helpful: {helpfulFeedback}
+            </span>
+            <span className="rounded-full border border-red-300/20 bg-red-400/10 px-2.5 py-1 text-red-100">
+              Not Helpful: {notHelpfulFeedback}
+            </span>
+          </div>
+        </div>
+
+        {feedbackData.length > 0 ? (
+          <div className="mt-4 h-[280px] w-full">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={feedbackData}>
+                <XAxis dataKey="date" tick={{ fill: '#cbd5e1', fontSize: 12 }} axisLine={{ stroke: '#334155' }} tickLine={{ stroke: '#334155' }} />
+                <YAxis tick={{ fill: '#cbd5e1', fontSize: 12 }} axisLine={{ stroke: '#334155' }} tickLine={{ stroke: '#334155' }} />
+                <Tooltip
+                  contentStyle={{ background: '#0f172a', border: '1px solid #334155', borderRadius: 10, color: '#f8fafc' }}
+                  labelStyle={{ color: '#f8fafc' }}
+                />
+                <Legend wrapperStyle={{ color: '#cbd5e1' }} />
+                <Bar dataKey="helpful" name="Helpful" stackId="feedback" fill="#34d399" radius={[4, 4, 0, 0]} />
+                <Bar dataKey="notHelpful" name="Not Helpful" stackId="feedback" fill="#f87171" radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-300/85">No feedback trend data available yet.</p>
+        )}
       </section>
 
       {dailyData.length > 0 ? (

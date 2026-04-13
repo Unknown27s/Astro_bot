@@ -15,9 +15,11 @@
 5. [Announcements](#announcements)
 6. [Voice Chat](#voice-chat)
 7. [Suggestions](#suggestions)
-8. [Rate Limits](#rate-limits)
-9. [Error Responses](#error-responses)
-10. [Examples](#examples)
+8. [Feedback](#feedback)
+9. [Monitor](#monitor)
+10. [Rate Limits](#rate-limits)
+11. [Error Responses](#error-responses)
+12. [Examples](#examples)
 
 ---
 
@@ -594,8 +596,145 @@ curl http://localhost:8000/api/announcements | jq
   "popular": [
     "What is the fee structure?"
   ],
+  "document_based": [
+    "What does the section 'Attendance Policy' explain?"
+  ],
   "preset": [
     "What are the admission requirements?"
+  ]
+}
+```
+
+**Notes:**
+- `document_based` suggestions are generated from uploaded document text/headings and refreshed as new documents are indexed.
+
+---
+
+## Feedback
+
+### Submit Chat Feedback
+
+**Endpoint:** `POST /api/feedback`
+
+**Access:** All authenticated users
+
+**Request:**
+```json
+{
+  "trace_id": "6a1fd2f0-8d86-4a26-b6f8-97b0ef8d34e8",
+  "rating": 1,
+  "user_id": "user-123",
+  "comment": "Helpful answer"
+}
+```
+
+**Notes:**
+- `rating` must be `1` (helpful) or `-1` (not helpful)
+- Feedback is persisted in SQLite for admin analytics
+- If Langfuse is enabled, the same feedback is also exported as `user_feedback`
+
+**Response:** `200 OK`
+```json
+{
+  "accepted": true,
+  "trace_id": "6a1fd2f0-8d86-4a26-b6f8-97b0ef8d34e8",
+  "feedback_id": "f5892c2b-2b57-4f97-96b2-fc2d2c8f01cb",
+  "langfuse_recorded": true
+}
+```
+
+### Analytics Feedback Fields
+
+`GET /api/analytics` includes these feedback fields:
+
+- `total_feedback`
+- `helpful_feedback`
+- `not_helpful_feedback`
+- `helpful_feedback_rate`
+- `daily_feedback` (array with `day`, `helpful`, `not_helpful`, `total`)
+
+---
+
+## Monitor
+
+### Trace Timeline
+
+**Endpoint:** `GET /api/monitor/traces`
+
+**Access:** Admin (frontend admin panel usage)
+
+**Query Parameters:**
+- `limit` (int, optional, default `120`, max `500`)
+- `status` (optional: `ok`, `http_error`, `error`)
+- `endpoint` (optional, exact endpoint path)
+- `provider` (optional, exact provider name)
+
+**Response:** `200 OK`
+```json
+{
+  "items": [
+    {
+      "id": "4dcf4e74-99f8-4f0e-a8d8-2e1f308df3fe",
+      "trace_id": "5cf95f16-c63b-4f61-9d2a-933956c95d73",
+      "endpoint": "/api/chat",
+      "status": "ok",
+      "query_preview": "What is the attendance policy?",
+      "response_time_ms": 842.4,
+      "retrieval_top_score": 0.81,
+      "retrieval_mode": "hybrid",
+      "hyde_applied": true,
+      "provider": "groq",
+      "model": "llama-3.3-70b-versatile",
+      "fallback_chain": [
+        {"name": "groq", "success": true}
+      ],
+      "created_at": "2026-04-12T12:43:12.129244"
+    }
+  ],
+  "count": 1
+}
+```
+
+### Monitor Overview
+
+**Endpoint:** `GET /api/monitor/overview`
+
+**Access:** Admin (frontend admin panel usage)
+
+**Query Parameters:**
+- `minutes` (int, optional, default `60`, min `5`, max `1440`)
+- `include_providers` (bool, optional, default `false`)
+
+**Purpose:**
+- Consolidates trace failure trends, health components, and optional provider statuses.
+- Returns alert objects to quickly detect which subsystem is degraded or failing.
+
+**Response:** `200 OK`
+```json
+{
+  "status": "degraded",
+  "window_minutes": 60,
+  "trace_summary": {
+    "total_requests": 120,
+    "failed_requests": 5,
+    "failure_rate": 4.17,
+    "avg_latency_ms": 932.6,
+    "by_endpoint": [
+      {
+        "endpoint": "/api/chat",
+        "total": 110,
+        "failed": 3,
+        "avg_latency": 901.1
+      }
+    ]
+  },
+  "alerts": [
+    {
+      "type": "component",
+      "name": "embeddings",
+      "status": "warning",
+      "message": "all-MiniLM-L6-v2 (lazy load)"
+    }
   ]
 }
 ```

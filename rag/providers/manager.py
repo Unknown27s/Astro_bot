@@ -92,24 +92,58 @@ class ProviderManager:
             return chain
 
     def generate(self, system_prompt: str, user_message: str,
-                 temperature: float, max_tokens: int) -> Optional[str]:
+                 temperature: float, max_tokens: int, trace=None) -> Optional[str]:
         """
         Try each provider in the chain until one succeeds.
         Returns the response text, or None if all providers fail.
+        
+        Args:
+            system_prompt: System instruction for the LLM
+            user_message: User message including context + question
+            temperature: Sampling temperature
+            max_tokens: Maximum tokens for the response
+            trace: Optional PipelineTrace for terminal explainability
         """
         chain = self._get_chain()
         last_error = None
+        providers_tried = []
+
         for provider in chain:
             try:
                 result = provider.generate(system_prompt, user_message, temperature, max_tokens)
                 if result:
+                    providers_tried.append((provider.name, True))
+                    # Record successful generation in trace
+                    if trace:
+                        trace.record_generation(
+                            provider=provider.name,
+                            model=getattr(provider, 'model', 'unknown'),
+                            temperature=temperature,
+                            max_tokens=max_tokens,
+                            time_ms=0,  # timing is done in generator.py
+                            providers_tried=providers_tried,
+                        )
                     return result
             except Exception as e:
                 last_error = e
+                providers_tried.append((provider.name, False))
                 print(f"[ProviderManager] {provider.name} failed: {e}")
                 continue
+
         if last_error:
             print(f"[ProviderManager] All providers failed. Last error: {last_error}")
+
+        # Record failure in trace
+        if trace and providers_tried:
+            trace.record_generation(
+                provider="NONE (all failed)",
+                model="N/A",
+                temperature=temperature,
+                max_tokens=max_tokens,
+                time_ms=0,
+                providers_tried=providers_tried,
+            )
+
         return None
 
     def is_any_available(self) -> bool:

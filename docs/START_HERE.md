@@ -1,262 +1,122 @@
-# 🚀 START_HERE — For AI Agents & Copilot
+# 🚀 START_HERE — Project Overview
 
-**Read this FIRST before working on IMS AstroBot**
-
----
-
-## 📌 What is IMS AstroBot?
-
-**IMS AstroBot** is a **Retrieval-Augmented Generation (RAG) chatbot** for institutional users.
-
-### The Problem
-Students/Faculty search through scattered documents (PDFs, handbooks, policies) to find answers. Information is often outdated, scattered, or unclear.
-
-### The Solution
-Users ask natural language questions → Bot finds relevant institutional documents → Bot generates answer grounded in those documents → Answer includes source citations.
-
-### Example
-```
-User: "What is the annual leave policy?"
-AstroBot: "Annual leave is 30 days per year, plus 10 sick days.
-          Medical leave requires HR approval.
-          See: leave-policy.pdf, HR handbook"
-```
+Read this first if you want the current shape of AstroBot in one place.
 
 ---
 
-## 🎯 Three Core Ideas
+## 📌 What AstroBot Is
 
-### 1. RAG = Retrieval + Generation
+AstroBot is a document-grounded institutional assistant built around retrieval-augmented generation.
+
+Users ask questions about institutional documents, and the system retrieves relevant chunks before generating a cited answer.
+
+Current focus areas:
+- document upload and parsing
+- chunking and embeddings into ChromaDB
+- hybrid retrieval with dense search, BM25, and HyDE fallback
+- feedback capture and trace monitoring
+- voice input through Whisper
+- role-based access for admin, faculty, and student users
+
+---
+
+## 🎯 Core Ideas
+
+### 1. Retrieval first, generation second
 ```
-Old way:   Question → LLM → Answer (may hallucinate)
-RAG way:   Question → Find docs → LLM uses docs → Answer (factual, cited)
+Question -> Retrieve relevant chunks -> LLM answers with context -> Citations shown to the user
 ```
 
-### 2. System is Resilient
+### 2. Resilience matters
 ```
-Primary LLM fails? → Try backup → Try another → Use document context only
-= Always returns something useful
+Primary provider fails -> fallback provider -> local provider -> context-only response
 ```
 
-### 3. Simple, Extensible Architecture
+### 3. The project is multi-layered
 ```
-Parser → Chunker → Embedder → ChromaDB (storage)
-                                    ↓
-User Question → Retriever → Generator → Answer
-                                    ↓
-                            LLMProvider (Ollama, Grok, Gemini)
+Parser -> Chunker -> Embedder -> ChromaDB
+    ↓
+User question -> Retriever -> Generator -> Response
 ```
 
 ---
 
-## 🏗️ System Architecture (30-second version)
+## 🏗️ System View
 
 ```
-FRONTEND
-├─ Streamlit UI (http://localhost:8501)
-├─ FastAPI REST (http://localhost:8000)
-├─ React Web UI (http://localhost:5173)
-└─ Spring Boot (http://localhost:8080)
-        ↓
-APPLICATION
-├─ Authentication (SHA-256 password, session-based)
-├─ RAG Pipeline (retrieve docs + generate answers)
-└─ Admin Dashboard (manage docs, users, AI settings)
-        ↓
-DATA LAYER
-├─ ChromaDB (vector database for semantic search)
-├─ SQLite (relational DB: users, documents, query_logs)
-├─ Embeddings (all-MiniLM-L6-v2, 384 dimensions)
-└─ LLM Providers (Ollama local, Grok cloud, Gemini cloud)
+React frontend (admin + chat)
+  ↓
+Spring Boot proxy layer
+  ↓
+FastAPI backend
+  ├─ Auth and user APIs
+  ├─ Document ingestion and retrieval
+  ├─ Feedback and trace monitoring
+  └─ Voice-to-text + analytics
+  ↓
+Data layer
+  ├─ ChromaDB for embeddings
+  ├─ SQLite for metadata and logs
+  └─ Local models and provider integrations
+```
+
+The repo still includes a Streamlit interface, but the current development focus is the FastAPI + React + Spring Boot stack.
+
+---
+
+## 🔄 Query Flow
+
+1. User asks a question.
+2. The question is embedded.
+3. Retrieval combines dense similarity, BM25, and HyDE fallback when needed.
+4. The generator builds the answer from retrieved context.
+5. The response includes citations and is logged for analytics and tracing.
+
+---
+
+## 📁 Key Files
+
+```
+config.py           - runtime configuration
+api_server.py       - FastAPI entry point
+ingestion/parser.py - document parsing
+ingestion/embedder.py - embeddings and storage
+rag/retriever.py    - retrieval logic
+rag/generator.py    - answer generation
+database/db.py      - SQLite tables and analytics
+views/              - Streamlit UI pages
+react-frontend/     - modern web UI
+springboot-backend/ - proxy and integration layer
 ```
 
 ---
 
-## 🔄 Complete Query Flow (What happens when user asks a question)
+## 🔑 What to Check Before Editing
 
-```
-1. USER ASKS QUESTION
-   "What is the annual leave policy?"
-
-2. RETRIEVER (~15 ms)
-   ├─ Convert question to vector (384 dimensions)
-   ├─ Search ChromaDB for similar document chunks
-   ├─ Return top-5 most relevant chunks
-   └─ Each chunk includes: text, source, relevance score
-
-3. GENERATOR (~300-2000 ms)
-   ├─ Format chunks as context
-   ├─ Send to LLM: "Based on context: {docs}, answer: {question}"
-   ├─ LLM reads context and generates answer
-   └─ If LLM fails, use fallback (show context directly)
-
-4. DISPLAY
-   ├─ Show answer
-   ├─ Show source citations
-   └─ Log interaction to database
-
-TOTAL TIME: ~350-2000 ms
-```
+- `config.py` for runtime flags and provider settings
+- `database/db.py` for persisted tables and analytics
+- `rag/retriever.py` for retrieval behavior
+- `api_server.py` for exposed API endpoints
+- `react-frontend/src/services/api.js` for frontend API wiring
 
 ---
 
-## 📁 Project Structure (Key Files)
+## 🚀 Quick Setup
 
-```
-AstroBot/
-├── config.py                      ← ALL SETTINGS HERE
-├── .env                           ← Environment variables
-│
-├── database/db.py                 ← SQLite CRUD
-├── auth/auth.py                   ← User authentication
-│
-├── ingestion/
-│   ├── parser.py                 ← Parse PDF/DOCX/Excel/PPTX/HTML
-│   ├── chunker.py                ← Break text into chunks
-│   └── embedder.py               ← Convert to vectors, store
-│
-├── rag/
-│   ├── retriever.py              ← Search + format context
-│   ├── generator.py              ← Call LLM, handle fallback
-│   └── providers/
-│       ├── manager.py            ← Route to LLM (with fallback)
-│       ├── ollama_provider.py    ← Local LLM
-│       ├── groq_provider.py      ← Grok API
-│       └── gemini_provider.py    ← Gemini API
-│
-├── views/
-│   ├── chat.py                   ← User chat interface
-│   └── admin.py                  ← Admin dashboard
-│
-├── app.py                        ← Streamlit entry point
-├── api_server.py                 ← FastAPI REST API
-│
-└── data/
-    ├── uploads/                  ← Uploaded documents
-    ├── chroma_db/                ← Vector database
-    └── astrobot.db               ← SQLite database
-```
+1. Install Python dependencies with `pip install -r requirements.txt`.
+2. Configure `.env`.
+3. Start the API and frontend stack.
+4. Verify `http://localhost:8000/api/health`.
 
 ---
 
-## 🔑 Key Concepts You MUST Know
+## 🧪 Useful Checks
 
-### 1. Configuration
-- **All settings in:** `config.py`
-- **Secrets in:** `.env` (NOT in git)
-- **Never hardcode:** paths, API keys, model names
+- Test embeddings with `ingestion.embedder.generate_embeddings()`
+- Test retrieval with `rag.retriever.retrieve_context()`
+- Test provider availability with `rag.providers.manager.get_manager()`
+- Test DB access with `database.db.authenticate_user()`
 
-### 2. RAG is the Core
-```
-Parse → Chunk → Embed → Store
-                         (admin action)
-                            ↓
-                       Search → Format → Generate
-                         (user query)
-```
-
-### 3. Fallback Chain Ensures Resilience
-```
-Try Primary Provider (e.g., Grok)
-  ↓ if fails
-Try Fallback Provider (e.g., Gemini)
-  ↓ if fails
-Try Ollama (local, always works)
-  ↓ if fails
-Return context-only (show document chunks)
-  = User always gets SOMETHING
-```
-
-### 4. Database Has Three Tables
-```
-users: id, username, password_hash, role
-documents: id, filename, chunk_count, status
-query_logs: id, user_id, query_text, response_text
-```
-
-### 5. ChromaDB Stores Vectors
-```
-Per chunk: {
-  embedding: [384 floats],
-  metadata: {source, heading, chunk_index},
-  document: "actual text"
-}
-Search: similarity = 1 - (distance / 2)
-```
-
----
-
-## 🚀 Quick Setup (< 5 minutes)
-
-```powershell
-# 1. Activate environment
-.\venv\Scripts\Activate.ps1
-
-# 2. Install dependencies
-pip install -r requirements.txt
-
-# 3. Create .env
-echo "LLM_MODE=local_only" > .env
-echo "OLLAMA_BASE_URL=http://localhost:11434" >> .env
-echo "OLLAMA_MODEL=qwen3:0.6b" >> .env
-
-# 4. Start all servers
-.\start-all-servers.ps1
-
-# 5. Access
-# Streamlit: http://localhost:8501
-# Login: admin / admin123
-```
-
----
-
-## 💡 Before You Start Coding
-
-### ✅ DO:
-- Check `config.py` first for all settings
-- Use parameterized SQL queries (`?` placeholders)
-- Log errors explicitly (don't silently fail)
-- Test provider chain: `get_manager().get_all_statuses()`
-- Use `st.session_state` for Streamlit state
-- Call `reset_manager()` after `.env` changes
-
-### ❌ DON'T:
-- Hardcode paths, API keys, model names
-- Assume Ollama is always running (check `is_available()`)
-- Load all documents into memory (use ChromaDB)
-- Skip error handling in RAG pipeline
-- Embed credentials in code
-- Forget parameterized SQL queries
-
----
-
-## 🧪 Testing Your Changes
-
-### Quick Test Commands
-
-```python
-# Test embeddings work
-from ingestion.embedder import generate_embeddings
-v = generate_embeddings(["test"])
-print(len(v[0]))  # Should be: 384
-
-# Test ChromaDB
-from ingestion.embedder import get_collection
-collection = get_collection()
-print(collection.count())  # Total vectors
-
-# Test Ollama
-from rag.providers.ollama_provider import OllamaProvider
-llm = OllamaProvider("http://localhost:11434", "qwen3:0.6b")
-print(llm.is_available())  # True or False
-
-# Test database
-from database.db import authenticate_user
-user = authenticate_user("admin", "admin123")
-print(user)  # {id, username, role, ...}
-```
-
----
 
 ## 📊 Performance You Should Know
 

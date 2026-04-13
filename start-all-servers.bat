@@ -18,7 +18,7 @@ echo ═════════════════════════
 echo.
 
 REM Fix JAVA_HOME for Maven wrapper
-set "JAVA_HOME=C:\Program Files\Java\jdk-21"
+set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
 if not exist "%JAVA_HOME%\bin\java.exe" (

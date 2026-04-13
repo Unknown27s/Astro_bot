@@ -10,6 +10,12 @@ const fileApi = axios.create({
   baseURL: '/api',
 });
 
+// Trace monitor endpoints currently exist on FastAPI directly.
+const monitorApi = axios.create({
+  baseURL: import.meta.env.VITE_MONITOR_API_BASE || 'http://localhost:8000/api',
+  headers: { 'Content-Type': 'application/json' },
+});
+
 // ── Auth ──
 export const login = (username, password) =>
   api.post('/auth/login', { username, password });
@@ -40,6 +46,9 @@ export const deleteAnnouncement = (id, userId, userRole) =>
 // ── Suggestions / Autocomplete ──
 export const getSuggestions = (query, userId) =>
   api.get('/suggestions', { params: { q: query, user_id: userId } });
+
+export const submitFeedback = (traceId, rating, userId, comment = '') =>
+  api.post('/feedback', { trace_id: traceId, rating, user_id: userId, comment });
 
 // ── Documents ──
 export const uploadDocument = (file, uploadedBy) => {
@@ -72,6 +81,13 @@ export const getAnalytics = () => api.get('/analytics');
 
 export const getQueryLogs = (limit = 50) =>
   api.get('/analytics/logs', { params: { limit } });
+
+// ── Trace Monitor (Admin) ──
+export const getTraceMonitorEvents = (params = {}) =>
+  monitorApi.get('/monitor/traces', { params });
+
+export const getTraceMonitorOverview = (minutes = 60, includeProviders = false) =>
+  monitorApi.get('/monitor/overview', { params: { minutes, include_providers: includeProviders } });
 
 // ── Health ──
 export const getHealth = () => api.get('/health');

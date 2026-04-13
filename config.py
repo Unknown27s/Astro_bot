@@ -57,16 +57,29 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 # ── Retrieval ──
 TOP_K_RESULTS = 5
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "dense")  # dense | hybrid
+HYBRID_DENSE_WEIGHT = float(os.getenv("HYBRID_DENSE_WEIGHT", "0.7"))
+HYBRID_BM25_CANDIDATES = int(os.getenv("HYBRID_BM25_CANDIDATES", "40"))
+HYBRID_DENSE_CANDIDATES = int(os.getenv("HYBRID_DENSE_CANDIDATES", "20"))
+HYDE_ENABLED = os.getenv("HYDE_ENABLED", "false").lower() == "true"
+HYDE_TRIGGER_SCORE = float(os.getenv("HYDE_TRIGGER_SCORE", "0.58"))
+HYDE_SCORE_BLEND = float(os.getenv("HYDE_SCORE_BLEND", "0.6"))
+HYDE_MAX_TOKENS = int(os.getenv("HYDE_MAX_TOKENS", "180"))
+HYDE_MAX_CHARS = int(os.getenv("HYDE_MAX_CHARS", "1400"))
+HYDE_TEMPERATURE = float(os.getenv("HYDE_TEMPERATURE", "0.2"))
 
 # ── Supported file types ──
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".xlsx", ".csv", ".pptx", ".html", ".htm"}
 
 # ── System Prompt (editable from Admin AI Settings) ──
-_DEFAULT_SYSTEM_PROMPT = """You are IMS AstroBot, a helpful and accurate academic assistant for an institutional management system. 
-You answer questions based ONLY on the provided institutional documents and context.
-If the context does not contain enough information to answer the question, say so clearly.
-Do not make up information. Always be concise, professional, and helpful.
-If citing specific regulations or policies, mention the source document when possible."""
+_DEFAULT_SYSTEM_PROMPT = """You are IMS AstroBot, the AI assistant for Rajalakshmi Institute of Technology (RIT).
+
+Guidelines:
+1. Prefer uploaded institutional context when it is available and relevant.
+2. If the question is unclear, infer likely intent and provide a best-effort helpful answer.
+3. If institutional context is missing, use your broader knowledge and reasoning to answer clearly.
+4. For official policy-like topics, mention when the response is general guidance and recommend verification with the institute office.
+5. Keep responses concise, practical, and student-friendly."""
 
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 
@@ -106,6 +119,12 @@ RATE_LIMIT_PER_USER = os.getenv("RATE_LIMIT_PER_USER", "30/minute")
 RATE_LIMIT_CHAT = os.getenv("RATE_LIMIT_CHAT", "5/minute")
 RATE_LIMIT_UPLOAD = os.getenv("RATE_LIMIT_UPLOAD", "10/minute")
 RATE_LIMIT_AUTH = os.getenv("RATE_LIMIT_AUTH", "5/minute")
+
+# ── Observability (Langfuse) ──
+LANGFUSE_ENABLED = os.getenv("LANGFUSE_ENABLED", "false").lower() == "true"
+LANGFUSE_HOST = os.getenv("LANGFUSE_HOST", "https://cloud.langfuse.com")
+LANGFUSE_PUBLIC_KEY = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+LANGFUSE_SECRET_KEY = os.getenv("LANGFUSE_SECRET_KEY", "")
 
 #  ── Document Tagging (Phase 3) ──
 DEFAULT_CLASSIFICATIONS = ["Policy", "Handbook", "Procedure", "Academic", "Administrative", "Finance", "HR", "Archived", "Other"]

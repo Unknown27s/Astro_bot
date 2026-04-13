@@ -1,0 +1,8 @@
+relation_id,from_place_id,relation,to_place_id,distance_m,direction,confidence,verification_status,notes
+rel_001,rit_admin_block,near,rit_main_gate,120,west,medium,needs_verification,"Verify by physical walkthrough"
+rel_002,rit_library,near,rit_block_a,90,north,medium,needs_verification,"Approx only"
+rel_003,rit_exam_cell,inside,rit_admin_block,20,na,high,needs_verification,"Should be mapped to room once known"
+rel_004,rit_canteen,near,rit_parking,80,south,medium,needs_verification,"Approx only"
+rel_005,rit_bus_bay,near,rit_main_gate,60,south,medium,needs_verification,"Approx only"
+rel_006,rit_block_b,next_to,rit_block_a,40,east,medium,needs_verification,"Verify orientation"
+rel_007,rit_block_c,next_to,rit_block_b,45,east,medium,needs_verification,"Verify orientation"

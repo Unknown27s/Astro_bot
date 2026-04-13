@@ -123,9 +123,15 @@ WARNING: Locked PDF rejected: document.pdf
   "doc_id": "doc-1712150440",
   "filename": "course_handbook.pdf",
   "chunks_indexed": 45,
-  "file_size": 1024000
+  "file_size": 1024000,
+  "suggested_questions": [
+    "Can you summarize key points from course handbook?",
+    "What does the section 'Attendance Policy' explain?"
+  ]
 }
 ```
+
+`suggested_questions` are generated from the uploaded document's headings and content and are used by `/api/suggestions` autocomplete.
 
 ### Error Responses
 

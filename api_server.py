@@ -40,6 +40,7 @@ RATE_LIMIT_RESET_TIER = "10/minute"
 # ── Initialize Rate Limiting ──
 from middleware.rate_limiter import get_limiter, log_rate_limit_exceeded
 from slowapi.errors import RateLimitExceeded
+from rag.observability import start_observation, record_feedback
 
 limiter = get_limiter()
 app_instance_limiter = limiter  # Will be assigned after app creation
@@ -48,9 +49,11 @@ app_instance_limiter = limiter  # Will be assigned after app creation
 from database.db import (
     init_db, authenticate_user, create_user, get_all_users,
     toggle_user_active, delete_user, add_document, get_all_documents,
-    delete_document, log_query, get_query_logs, get_analytics, get_connection,
+    delete_document, log_query, get_query_logs, get_analytics, get_connection, log_feedback,
+    log_trace_event, get_trace_events, get_trace_event_summary,
     store_memory, delete_memory, cleanup_expired_memory, invalidate_memory_by_source,
     get_memory_stats, clear_all_memory,
+    store_document_question_suggestions,
     get_all_rate_limits, get_rate_limit, update_rate_limit, toggle_rate_limit, reset_rate_limits_to_default,
     get_suggestions, create_announcement, get_recent_announcements,
 )
@@ -165,6 +168,13 @@ class ChatResponse(BaseModel):
     citations: str
     response_time_ms: float
     transcribed_text: Optional[str] = None
+    trace_id: Optional[str] = None
+
+class FeedbackRequest(BaseModel):
+    trace_id: str
+    rating: int  # 1 helpful, -1 not helpful
+    user_id: Optional[str] = None
+    comment: Optional[str] = None
 
 class CreateUserRequest(BaseModel):
     username: str
@@ -259,110 +269,268 @@ def api_chat(req: ChatRequest, request: Request):
     """Send a query through the RAG pipeline and get a response."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
     from rag.generator import generate_response
+    from rag.pipeline_trace import PipelineTrace
 
     start_time = time.time()
-
-    # --- Announcement Feature Intercept ---
-    if req.query.strip().lower().startswith("@announcement"):
-        from database.db import get_connection
-        conn = get_connection()
-        user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
-        conn.close()
-        
-        if not user_row or user_row['role'] not in ('admin', 'faculty'):
-            raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
-            
-        # Bypass RAG AND memory cache — call LLM directly so each announcement is unique
-        from rag.providers.manager import get_manager
-        from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
-        
-        raw_text = req.query[13:].strip()
-        announcement_prompt = (
-            "You are an institutional announcer. Please format the following raw text "
-            "into a professional, clear, and engaging announcement with suitable emojis. "
-            "Do not add conversational filler, just output the announcement text.\n\n"
-            f"Raw text: {raw_text}"
-        )
-        
-        mgr = get_manager()
-        formatted_announcement = mgr.generate(
-            system_prompt=SYSTEM_PROMPT,
-            user_message=announcement_prompt,
-            temperature=MODEL_TEMPERATURE,
-            max_tokens=MODEL_MAX_TOKENS,
-        )
-        
-        if not formatted_announcement:
-            formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
-            
-        create_announcement(req.user_id, req.username, formatted_announcement)
-        
-        elapsed_ms = (time.time() - start_time) * 1000
-        return ChatResponse(
-            response="✅ Announcement generated and posted successfully!\n\n---\n\n" + formatted_announcement,
-            sources=[],
-            citations="",
-            response_time_ms=round(elapsed_ms, 1)
-        )
-
-    # Step 1: Retrieve relevant chunks
-    chunks = retrieve_context(req.query)
-
-    # Step 2: Format context for LLM
-    context = format_context_for_llm(chunks)
-
-    # Step 3: Generate response (now includes memory handling)
-    gen_result = generate_response(req.query, context, user_id=req.user_id, sources=[c.get("source", "") for c in chunks])
-    
-    # Extract response from dict
-    response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
-    from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
-    memory_id = gen_result.get("memory_id") if isinstance(gen_result, dict) else None
-
-    # Step 4: Get citations
-    citations = get_source_citations(chunks)
-
-    elapsed_ms = (time.time() - start_time) * 1000
-
-    # Log query (but note if from memory for analytics)
-    try:
-        source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
-        # ALWAYS log the query (even if from memory) to ensure Admin Analytics is accurate
-        # and popular questions are tracked correctly.
-        log_response_text = f"[⚡ CACHED] {response_text}" if from_memory else response_text
-        
-        log_query(
-            user_id=req.user_id,
-            username=req.username,
-            query_text=req.query,
-            response_text=log_response_text[:500],
-            sources=source_names,
-            response_time_ms=elapsed_ms,
-        )
-        logger.info(
-            f"Query logged successfully",
-            extra={
-                "user_id": req.user_id,
-                "response_time_ms": round(elapsed_ms, 2),
-                "sources": source_names,
-            }
-        )
-    except Exception as e:
-        logger.error(
-            f"Error logging query: {str(e)}",
-            extra={
-                "user_id": req.user_id,
-                "query": req.query[:100],
-            },
-            exc_info=True,
-        )
-
-    return ChatResponse(
-        response=response_text,
-        sources=chunks,
-        citations=citations,
-        response_time_ms=round(elapsed_ms, 1),
+    obs_trace = start_observation(
+        name="api.chat",
+        user_id=req.user_id,
+        input_payload={
+            "query_preview": req.query[:200],
+            "username": req.username,
+        },
+        metadata={
+            "endpoint": "/api/chat",
+            "voice": False,
+        },
     )
+
+    try:
+        # --- Announcement Feature Intercept ---
+        if req.query.strip().lower().startswith("@announcement"):
+            from database.db import get_connection
+            conn = get_connection()
+            user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
+            conn.close()
+
+            if not user_row or user_row['role'] not in ('admin', 'faculty'):
+                raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
+
+            # Bypass RAG AND memory cache — call LLM directly so each announcement is unique
+            from rag.providers.manager import get_manager
+            from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
+
+            raw_text = req.query[13:].strip()
+            announcement_prompt = (
+                "You are an institutional announcer. Please format the following raw text "
+                "into a professional, clear, and engaging announcement with suitable emojis. "
+                "Do not add conversational filler, just output the announcement text.\n\n"
+                f"Raw text: {raw_text}"
+            )
+
+            mgr = get_manager()
+            formatted_announcement = mgr.generate(
+                system_prompt=SYSTEM_PROMPT,
+                user_message=announcement_prompt,
+                temperature=MODEL_TEMPERATURE,
+                max_tokens=MODEL_MAX_TOKENS,
+            )
+
+            if not formatted_announcement:
+                formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
+
+            create_announcement(req.user_id, req.username, formatted_announcement)
+
+            elapsed_ms = (time.time() - start_time) * 1000
+            obs_trace.end(
+                metadata={
+                    "announcement_post": True,
+                    "elapsed_ms": round(elapsed_ms, 2),
+                    "status": "ok",
+                }
+            )
+            try:
+                log_trace_event(
+                    trace_id=obs_trace.trace_id,
+                    endpoint="/api/chat",
+                    user_id=req.user_id,
+                    username=req.username,
+                    status="ok",
+                    query_preview=req.query,
+                    response_time_ms=elapsed_ms,
+                    retrieval_mode="announcement",
+                    chunks_count=0,
+                    provider="",
+                    model="",
+                )
+            except Exception as event_exc:
+                logger.warning("Failed to log trace monitor event: %s", event_exc)
+            return ChatResponse(
+                response="✅ Announcement generated and posted successfully!\n\n---\n\n" + formatted_announcement,
+                sources=[],
+                citations="",
+                response_time_ms=round(elapsed_ms, 1),
+                trace_id=obs_trace.trace_id,
+            )
+
+        # ── Pipeline Trace (terminal transparency for jury demo) ──
+        trace = PipelineTrace(query=req.query, username=req.username)
+
+        # Step 1: Retrieve relevant chunks
+        from rag.conversation_history import get_history
+        history = get_history(req.user_id)
+        search_query = req.query
+        if history:
+            # Extract previous queries to provide context for vector search
+            previous_queries = " ".join([q for q, r in history])
+            search_query = f"{previous_queries} {req.query}"
+
+        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace)
+
+        # Step 2: Format context for LLM
+        context = format_context_for_llm(chunks)
+
+        # Step 3: Generate response (now includes memory handling)
+        gen_result = generate_response(
+            req.query,
+            context,
+            user_id=req.user_id,
+            sources=[c.get("source", "") for c in chunks],
+            trace=trace,
+            obs_trace=obs_trace,
+        )
+
+        # Extract response from dict
+        response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+        from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
+
+        # Step 4: Get citations
+        citations = get_source_citations(chunks)
+
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        # Record final response stats and print trace to terminal
+        unique_sources = len(set(c.get("source", "") for c in chunks))
+        trace.record_response(
+            response_length=len(response_text) if response_text else 0,
+            unique_sources=unique_sources,
+            from_memory=from_memory,
+        )
+        trace.print_summary()
+
+        # Store turn in conversation history for follow-up support
+        from rag.conversation_history import add_turn
+        if response_text and req.user_id:
+            add_turn(req.user_id, req.query, response_text)
+
+        # Log query (but note if from memory for analytics)
+        try:
+            source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
+            # ALWAYS log the query (even if from memory) to ensure Admin Analytics is accurate
+            # and popular questions are tracked correctly.
+            log_response_text = f"[⚡ CACHED] {response_text}" if from_memory else response_text
+
+            log_query(
+                user_id=req.user_id,
+                username=req.username,
+                query_text=req.query,
+                response_text=log_response_text[:500],
+                sources=source_names,
+                response_time_ms=elapsed_ms,
+            )
+            logger.info(
+                f"Query logged successfully",
+                extra={
+                    "user_id": req.user_id,
+                    "response_time_ms": round(elapsed_ms, 2),
+                    "sources": source_names,
+                }
+            )
+        except Exception as e:
+            logger.error(
+                f"Error logging query: {str(e)}",
+                extra={
+                    "user_id": req.user_id,
+                    "query": req.query[:100],
+                },
+                exc_info=True,
+            )
+
+        obs_trace.end(
+            metadata={
+                "status": "ok",
+                "from_memory": from_memory,
+                "elapsed_ms": round(elapsed_ms, 2),
+                "sources_count": unique_sources,
+            },
+            output={
+                "response_chars": len(response_text) if response_text else 0,
+            },
+        )
+
+        try:
+            retrieval_scores = [float(c.get("score", 0.0)) for c in chunks if isinstance(c.get("score", 0.0), (int, float))]
+            retrieval_methods = {str(c.get("retrieval_method", "dense")) for c in chunks}
+            hyde_applied = any("hyde" in m for m in retrieval_methods)
+            retrieval_mode = "hybrid" if any(("hybrid" in m or "bm25" in m) for m in retrieval_methods) else "dense"
+            providers_tried = [
+                {"name": name, "success": bool(ok)}
+                for name, ok in (trace.providers_tried or [])
+            ]
+
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat",
+                user_id=req.user_id,
+                username=req.username,
+                status="ok",
+                query_preview=req.query,
+                response_time_ms=elapsed_ms,
+                retrieval_top_score=max(retrieval_scores) if retrieval_scores else None,
+                retrieval_avg_score=(sum(retrieval_scores) / len(retrieval_scores)) if retrieval_scores else None,
+                retrieval_mode=retrieval_mode,
+                hyde_applied=hyde_applied,
+                chunks_count=len(chunks),
+                from_memory=from_memory,
+                provider=trace.provider_used or "",
+                model=trace.model_used or "",
+                fallback_chain=providers_tried,
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+
+        return ChatResponse(
+            response=response_text,
+            sources=chunks,
+            citations=citations,
+            response_time_ms=round(elapsed_ms, 1),
+            trace_id=obs_trace.trace_id,
+        )
+    except HTTPException as exc:
+        obs_trace.end(
+            metadata={
+                "status": "http_error",
+                "status_code": exc.status_code,
+            },
+            error=str(exc.detail),
+        )
+        try:
+            elapsed_ms = (time.time() - start_time) * 1000
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat",
+                user_id=req.user_id,
+                username=req.username,
+                status="http_error",
+                query_preview=req.query,
+                response_time_ms=elapsed_ms,
+                error_message=str(exc.detail),
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+        raise
+    except Exception as exc:
+        obs_trace.end(
+            metadata={
+                "status": "error",
+            },
+            error=str(exc),
+        )
+        try:
+            elapsed_ms = (time.time() - start_time) * 1000
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat",
+                user_id=req.user_id,
+                username=req.username,
+                status="error",
+                query_preview=req.query,
+                response_time_ms=elapsed_ms,
+                error_message=str(exc),
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+        raise
 
 
 @app.post("/api/chat/audio", response_model=ChatResponse)
@@ -376,65 +544,202 @@ def api_chat_audio(
     """Receive audio, transcribe to text, and process through RAG pipeline."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
     from rag.generator import generate_response
+    from rag.pipeline_trace import PipelineTrace
     import shutil
     from rag.voice_to_text import transcribe_audio
 
     start_time = time.time()
-    
-    file_ext = Path(audio.filename).suffix.lower()
-    if not file_ext:
-        file_ext = ".webm" # Default from browser
-        
-    safe_name = f"audio_{int(time.time())}{file_ext}"
-    file_path = UPLOAD_DIR / safe_name
-    
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(audio.file, buffer)
-        
-    transcribed_text, error = transcribe_audio(str(file_path))
-    
-    try:
-        os.remove(file_path)
-    except Exception as e:
-        logger.warning(f"Could not delete temp audio file: {e}")
-        
-    if error or not transcribed_text:
-        raise HTTPException(status_code=500, detail=f"Audio transcription failed: {error}")
-        
-    logger.info(f"User {username} spoke: {transcribed_text}")
-    
-    # Generate RAG response based on transcribed text
-    chunks = retrieve_context(transcribed_text)
-    context = format_context_for_llm(chunks)
-    
-    gen_result = generate_response(transcribed_text, context, user_id=user_id, sources=[c.get("source", "") for c in chunks])
-    
-    response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
-    citations = get_source_citations(chunks)
-    elapsed_ms = (time.time() - start_time) * 1000
-    
-    try:
-        source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
-        log_response_text = f"[🗣️ VOICE] {response_text}" 
-        
-        log_query(
-            user_id=user_id,
-            username=username,
-            query_text=f"[VOICE] {transcribed_text}",
-            response_text=log_response_text[:500],
-            sources=source_names,
-            response_time_ms=elapsed_ms,
-        )
-    except Exception as e:
-        logger.error(f"Error logging audio query: {str(e)}", exc_info=True)
-
-    return ChatResponse(
-        response=response_text,
-        sources=chunks,
-        citations=citations,
-        response_time_ms=round(elapsed_ms, 1),
-        transcribed_text=transcribed_text
+    obs_trace = start_observation(
+        name="api.chat.audio",
+        user_id=user_id,
+        input_payload={
+            "audio_filename": audio.filename,
+            "username": username,
+        },
+        metadata={
+            "endpoint": "/api/chat/audio",
+            "voice": True,
+        },
     )
+
+    try:
+        file_ext = Path(audio.filename).suffix.lower()
+        if not file_ext:
+            file_ext = ".webm"  # Default from browser
+
+        safe_name = f"audio_{int(time.time())}{file_ext}"
+        file_path = UPLOAD_DIR / safe_name
+
+        with open(file_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+
+        transcribed_text, error = transcribe_audio(str(file_path))
+
+        try:
+            os.remove(file_path)
+        except Exception as e:
+            logger.warning(f"Could not delete temp audio file: {e}")
+
+        if error or not transcribed_text:
+            raise HTTPException(status_code=500, detail=f"Audio transcription failed: {error}")
+
+        logger.info(f"User {username} spoke: {transcribed_text}")
+
+        # ── Pipeline Trace (terminal transparency for jury demo) ──
+        trace = PipelineTrace(query=f"[🎤 VOICE] {transcribed_text}", username=username)
+
+        # Generate RAG response based on transcribed text
+        from rag.conversation_history import get_history
+        history = get_history(user_id)
+        search_query = transcribed_text
+        if history:
+            # Extract previous queries to provide context for vector search
+            previous_queries = " ".join([q for q, r in history])
+            search_query = f"{previous_queries} {transcribed_text}"
+
+        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace)
+        context = format_context_for_llm(chunks)
+
+        gen_result = generate_response(
+            transcribed_text,
+            context,
+            user_id=user_id,
+            sources=[c.get("source", "") for c in chunks],
+            trace=trace,
+            obs_trace=obs_trace,
+        )
+
+        response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
+        from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
+        citations = get_source_citations(chunks)
+        elapsed_ms = (time.time() - start_time) * 1000
+
+        # Record final response stats and print trace to terminal
+        unique_sources = len(set(c.get("source", "") for c in chunks))
+        trace.record_response(
+            response_length=len(response_text) if response_text else 0,
+            unique_sources=unique_sources,
+            from_memory=from_memory,
+        )
+        trace.print_summary()
+
+        # Store turn in conversation history for follow-up support
+        from rag.conversation_history import add_turn
+        if response_text and user_id:
+            add_turn(user_id, transcribed_text, response_text)
+
+        try:
+            source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
+            log_response_text = f"[🗣️ VOICE] {response_text}"
+
+            log_query(
+                user_id=user_id,
+                username=username,
+                query_text=f"[VOICE] {transcribed_text}",
+                response_text=log_response_text[:500],
+                sources=source_names,
+                response_time_ms=elapsed_ms,
+            )
+        except Exception as e:
+            logger.error(f"Error logging audio query: {str(e)}", exc_info=True)
+
+        obs_trace.end(
+            metadata={
+                "status": "ok",
+                "from_memory": from_memory,
+                "elapsed_ms": round(elapsed_ms, 2),
+                "sources_count": unique_sources,
+            },
+            output={
+                "response_chars": len(response_text) if response_text else 0,
+                "transcribed_chars": len(transcribed_text),
+            },
+        )
+
+        try:
+            retrieval_scores = [float(c.get("score", 0.0)) for c in chunks if isinstance(c.get("score", 0.0), (int, float))]
+            retrieval_methods = {str(c.get("retrieval_method", "dense")) for c in chunks}
+            hyde_applied = any("hyde" in m for m in retrieval_methods)
+            retrieval_mode = "hybrid" if any(("hybrid" in m or "bm25" in m) for m in retrieval_methods) else "dense"
+            providers_tried = [
+                {"name": name, "success": bool(ok)}
+                for name, ok in (trace.providers_tried or [])
+            ]
+
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat/audio",
+                user_id=user_id,
+                username=username,
+                status="ok",
+                query_preview=transcribed_text,
+                response_time_ms=elapsed_ms,
+                retrieval_top_score=max(retrieval_scores) if retrieval_scores else None,
+                retrieval_avg_score=(sum(retrieval_scores) / len(retrieval_scores)) if retrieval_scores else None,
+                retrieval_mode=retrieval_mode,
+                hyde_applied=hyde_applied,
+                chunks_count=len(chunks),
+                from_memory=from_memory,
+                provider=trace.provider_used or "",
+                model=trace.model_used or "",
+                fallback_chain=providers_tried,
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+
+        return ChatResponse(
+            response=response_text,
+            sources=chunks,
+            citations=citations,
+            response_time_ms=round(elapsed_ms, 1),
+            transcribed_text=transcribed_text,
+            trace_id=obs_trace.trace_id,
+        )
+    except HTTPException as exc:
+        obs_trace.end(
+            metadata={
+                "status": "http_error",
+                "status_code": exc.status_code,
+            },
+            error=str(exc.detail),
+        )
+        try:
+            elapsed_ms = (time.time() - start_time) * 1000
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat/audio",
+                user_id=user_id,
+                username=username,
+                status="http_error",
+                query_preview="",
+                response_time_ms=elapsed_ms,
+                error_message=str(exc.detail),
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+        raise
+    except Exception as exc:
+        obs_trace.end(
+            metadata={
+                "status": "error",
+            },
+            error=str(exc),
+        )
+        try:
+            elapsed_ms = (time.time() - start_time) * 1000
+            log_trace_event(
+                trace_id=obs_trace.trace_id,
+                endpoint="/api/chat/audio",
+                user_id=user_id,
+                username=username,
+                status="error",
+                query_preview="",
+                response_time_ms=elapsed_ms,
+                error_message=str(exc),
+            )
+        except Exception as event_exc:
+            logger.warning("Failed to log trace monitor event: %s", event_exc)
+        raise
 
 
 @app.get("/api/chat/status")
@@ -456,10 +761,51 @@ def api_chat_status():
 def api_get_suggestions(request: Request, q: str = "", user_id: str = None):
     """Get autocomplete suggestions for the chat input.
     
-    Returns recent user questions, popular questions, and preset suggestions.
+    Returns recent user questions, popular questions,
+    document-derived suggestions, and preset suggestions.
     """
     result = get_suggestions(query_prefix=q, user_id=user_id)
     return result
+
+
+@app.post("/api/feedback")
+@limiter.limit("30/minute")
+def api_submit_feedback(req: FeedbackRequest, request: Request):
+    """Submit user feedback tied to a trace id for observability and quality tuning."""
+    if req.rating not in (-1, 1):
+        raise HTTPException(status_code=400, detail="rating must be 1 or -1")
+
+    user_id = req.user_id or get_user_id(request)
+
+    accepted = record_feedback(
+        trace_id=req.trace_id,
+        rating=float(req.rating),
+        comment=req.comment,
+        metadata={
+            "user_id": user_id,
+            "source": "chat_ui",
+        },
+    )
+
+    try:
+        feedback_id = log_feedback(
+            trace_id=req.trace_id,
+            user_id=user_id,
+            rating=req.rating,
+            comment=req.comment or "",
+            source="chat_ui",
+            recorded_in_langfuse=bool(accepted),
+        )
+    except Exception as exc:
+        logger.error("Failed to persist feedback", extra={"trace_id": req.trace_id}, exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to persist feedback: {str(exc)}")
+
+    return {
+        "accepted": True,
+        "trace_id": req.trace_id,
+        "feedback_id": feedback_id,
+        "langfuse_recorded": bool(accepted),
+    }
 
 
 
@@ -478,6 +824,7 @@ def api_upload_document(
     from ingestion.parser import parse_document
     from ingestion.chunker import chunk_document
     from ingestion.embedder import store_chunks
+    from ingestion.question_suggester import generate_document_questions
 
     # ── Admin-only check (only if uploaded_by is provided) ──
     if uploaded_by:
@@ -543,6 +890,9 @@ def api_upload_document(
         os.remove(file_path)
         raise HTTPException(status_code=422, detail="No chunks generated from document (text may be too short)")
 
+    # Build question suggestions from uploaded content
+    suggested_questions = generate_document_questions(file.filename, text, chunks, limit=10)
+
     # Record in database
     try:
         doc_id = add_document(
@@ -565,11 +915,36 @@ def api_upload_document(
         logger.error(f"ChromaDB error for doc {doc_id}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to index document in vector database: {str(e)}")
 
+    # Persist upload-derived suggested questions (best-effort, non-blocking for upload)
+    try:
+        stored_q = store_document_question_suggestions(
+            document_id=doc_id,
+            questions=suggested_questions,
+            source_hint=file.filename,
+        )
+    except Exception as exc:
+        stored_q = 0
+        logger.warning(
+            "Failed to persist document question suggestions",
+            extra={"doc_id": doc_id, "doc_filename": file.filename, "error": str(exc)},
+        )
+
+    logger.info(
+        "Document upload indexed",
+        extra={
+            "doc_id": doc_id,
+            "doc_filename": file.filename,
+            "chunks_indexed": stored,
+            "suggested_questions": stored_q,
+        },
+    )
+
     return {
         "doc_id": doc_id,
         "filename": file.filename,
         "chunks_indexed": stored,
         "file_size": len(content),
+        "suggested_questions": suggested_questions[:6],
     }
 
 
@@ -841,6 +1216,97 @@ def api_analytics():
 def api_query_logs(limit: int = 50):
     """Get recent query logs."""
     return get_query_logs(limit=limit)
+
+
+@app.get("/api/monitor/traces")
+@limiter.limit("30/minute")
+def api_monitor_traces(
+    request: Request,
+    limit: int = 120,
+    status: Optional[str] = None,
+    endpoint: Optional[str] = None,
+    provider: Optional[str] = None,
+):
+    """Get recent trace timeline items for admin trace monitor UI."""
+    safe_limit = max(1, min(int(limit), 500))
+    items = get_trace_events(
+        limit=safe_limit,
+        status=status,
+        endpoint=endpoint,
+        provider=provider,
+    )
+    return {
+        "items": items,
+        "count": len(items),
+    }
+
+
+@app.get("/api/monitor/overview")
+@limiter.limit("30/minute")
+def api_monitor_overview(
+    request: Request,
+    minutes: int = 60,
+    include_providers: bool = False,
+):
+    """Get consolidated monitor view to detect subsystem issues quickly."""
+    window_minutes = max(5, min(int(minutes), 24 * 60))
+    trace_summary = get_trace_event_summary(window_minutes)
+    health = api_health()
+    provider_statuses = api_provider_statuses() if include_providers else {}
+
+    system_alerts = []
+
+    for name, comp in (health.get("components") or {}).items():
+        status_val = str((comp or {}).get("status", "error"))
+        message = str((comp or {}).get("message", ""))
+        if status_val in ("error", "warning", "degraded"):
+            system_alerts.append({
+                "type": "component",
+                "name": name,
+                "status": status_val,
+                "message": message,
+            })
+
+    for row in trace_summary.get("by_endpoint", []):
+        failed = int(row.get("failed", 0) or 0)
+        total = int(row.get("total", 0) or 0)
+        if failed <= 0:
+            continue
+        fail_rate = (failed / total * 100.0) if total else 0.0
+        system_alerts.append({
+            "type": "endpoint",
+            "name": row.get("endpoint", "unknown"),
+            "status": "error" if fail_rate >= 20 else "warning",
+            "message": f"{failed}/{total} failed in last {window_minutes}m ({fail_rate:.1f}%)",
+        })
+
+    if include_providers:
+        for provider_name, provider_info in (provider_statuses or {}).items():
+            if provider_name.startswith("_"):
+                continue
+            provider_state = str((provider_info or {}).get("status", "error"))
+            if provider_state in ("error", "warning", "degraded"):
+                system_alerts.append({
+                    "type": "provider",
+                    "name": provider_name,
+                    "status": provider_state,
+                    "message": str((provider_info or {}).get("message", "")),
+                })
+
+    overall = "healthy"
+    if any(a.get("status") == "error" for a in system_alerts):
+        overall = "unhealthy"
+    elif system_alerts:
+        overall = "degraded"
+
+    return {
+        "status": overall,
+        "window_minutes": window_minutes,
+        "trace_summary": trace_summary,
+        "health": health,
+        "providers": provider_statuses,
+        "alerts": system_alerts,
+    }
 
 
 # ═══════════════════════════════════════════════════════

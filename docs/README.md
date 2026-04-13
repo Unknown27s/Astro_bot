@@ -1,98 +1,61 @@
-# 📚 AstroBot v2.0 Documentation
+# 📚 AstroBot Documentation
 
-Welcome to the AstroBot documentation! This directory contains comprehensive guides for setup, development, and API usage.
+This directory documents the current AstroBot stack and keeps older phase-specific notes for reference.
+
+The active system is centered on:
+- FastAPI for the Python API layer
+- React + Vite for the modern web frontend
+- Spring Boot as the integration/proxy layer
+- Streamlit for the legacy/admin UI that still ships with the repo
+- ChromaDB + SentenceTransformers for retrieval
+- Hybrid retrieval with dense vectors, BM25, and HyDE fallback
+- Langfuse tracing, feedback capture, and trace monitoring
 
 ---
 
 ## 📖 Documentation Index
 
-### 🚀 [01 - Quick Start](./01-QUICKSTART.md)
-**Getting started in 5 minutes**
-- Installation steps
-- Dependency verification
-- Environment configuration
-- Running locally
-- Quick feature tests
-- Troubleshooting
+### Current docs
+- [START_HERE.md](./START_HERE.md) - project overview and query flow
+- [guides/QUICKREF.md](./guides/QUICKREF.md) - commands, config, and API shortcuts
+- [architecture/QUERY_TO_VECTOR_SEARCH.md](./architecture/QUERY_TO_VECTOR_SEARCH.md) - retrieval pipeline
+- [development/LANGFUSE_INTEGRATION_GUIDE.md](./development/LANGFUSE_INTEGRATION_GUIDE.md) - tracing, feedback, and monitor UI
+- [UPLOAD_API_REFERENCE.md](./UPLOAD_API_REFERENCE.md) - upload response and suggested questions
+- [Voice_to_Text_Implementation_Guide.md](./Voice_to_Text_Implementation_Guide.md) - Whisper voice input
 
-**Start here if you want to:** Get the app running quickly
+### Development and contribution
+- [COPILOT_GUIDE.md](./COPILOT_GUIDE.md) - workspace-specific agent guidance
+- [contribution/CONTRIBUTING.md](./contribution/CONTRIBUTING.md) - how to add or change features
+- [contribution/WORKFLOW.md](./contribution/WORKFLOW.md) - quick feature checklist
 
----
+### Legacy docs
+- [01-QUICKSTART.md](./01-QUICKSTART.md)
+- [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md)
+- [04-API_ENDPOINTS.md](./04-API_ENDPOINTS.md)
+- [05-ADMIN_RATE_LIMITING.md](./05-ADMIN_RATE_LIMITING.md)
 
-### 🔧 [02 - Implementation Summary](./02-IMPLEMENTATION_SUMMARY.md)
-**Complete implementation details**
-- Executive summary of features
-- Feature-by-feature breakdown:
-  - **Phase 1**: Error Tracking & Structured Logging
-  - **Phase 2**: Rate Limiting
-  - **Phase 3**: Document Tagging/Classification
-- Files created and modified
-- Configuration options
-- Testing checklist
-
-**Start here if you want to:** Understand what was implemented and how
-
----
-
-### 📡 [04 - API Endpoints](./04-API_ENDPOINTS.md)
-**Complete REST API reference**
-- Tag Management endpoints
-- Document Tagging endpoints
-- Classification endpoints
-- Search & Filtering
-- Rate Limits
-- Error Responses
-
-**Start here if you want to:** Integrate with the API
-
----
-
-### ⏱️ [05 - Admin Rate Limiting](./05-ADMIN_RATE_LIMITING.md)
-**Rate limit configuration guide**
-- Per-endpoint rate limits
-- Admin configuration
-- Monitoring rate limits
-
----
-
-### 🤝 [Contribution Guide](./contribution/CONTRIBUTING.md)
-**How to add new features yourself**
-- Architecture overview & data flow
-- Adding new API endpoints (Python → Spring Boot → React)
-- Adding new UI pages (React & Streamlit)
-- Adding new LLM providers
-- Adding new document parsers
-- Database changes
-- Testing checklist
-- Common patterns & troubleshooting
-
-Also see: [WORKFLOW.md](./contribution/WORKFLOW.md) - Quick checklist for feature development
-
----
-
-### 📝 [Changelog](./CHANGELOG.md)
-**Version history and changes**
-- Bug fixes and improvements
-- Files created/modified/deleted
-- Project structure after cleanup
+These older documents remain useful for history, but some details reflect earlier phases of the project.
 
 ---
 
 ## 🎯 Choose Your Path
 
-### 👤 I'm New - Just Want to Run the App
-**Follow this path:**
-1. Read: [01-QUICKSTART.md](./01-QUICKSTART.md) - 5 min
-2. Run: `pip install -r requirements.txt && python api_server.py`
-3. Test: `curl http://localhost:8000/api/health`
+### New contributor
+1. Read: [START_HERE.md](./START_HERE.md)
+2. Read: [guides/QUICKREF.md](./guides/QUICKREF.md)
+3. Read: [architecture/COMPLETE_UNDERSTANDING.md](./architecture/COMPLETE_UNDERSTANDING.md)
+4. Read: [development/CODE_CONVENTIONS.md](./development/CODE_CONVENTIONS.md)
 
-### 👨‍💻 I'm a Developer - Want to Understand Implementation
-**Follow this path:**
-1. Read: [START_HERE.md](./START_HERE.md) - Quick overview
-2. Read: [COPILOT_GUIDE.md](./COPILOT_GUIDE.md) - Development workflow
-3. Review: [02-IMPLEMENTATION_SUMMARY.md](./02-IMPLEMENTATION_SUMMARY.md)
-4. Explore: [04-API_ENDPOINTS.md](./04-API_ENDPOINTS.md)
-5. Check: [IMPROVEMENTS_NEEDED.md](./IMPROVEMENTS_NEEDED.md) - What needs work next
+### Feature work
+1. Read: [COPILOT_GUIDE.md](./COPILOT_GUIDE.md)
+2. Read: [contribution/CONTRIBUTING.md](./contribution/CONTRIBUTING.md)
+3. Read: [contribution/WORKFLOW.md](./contribution/WORKFLOW.md)
+4. Read: [development/LANGFUSE_INTEGRATION_GUIDE.md](./development/LANGFUSE_INTEGRATION_GUIDE.md)
+
+### Retrieval and document pipeline
+1. Read: [architecture/QUERY_TO_VECTOR_SEARCH.md](./architecture/QUERY_TO_VECTOR_SEARCH.md)
+2. Read: [UPLOAD_API_REFERENCE.md](./UPLOAD_API_REFERENCE.md)
+3. Read: [architecture/DATABASE_SCHEMA.md](./architecture/DATABASE_SCHEMA.md)
 
 ---
 
@@ -100,59 +63,40 @@ Also see: [WORKFLOW.md](./contribution/WORKFLOW.md) - Quick checklist for featur
 
 ```
 docs/
-├── 01-QUICKSTART.md          # Getting started guide
-├── 02-IMPLEMENTATION_SUMMARY.md  # Implementation details
-├── 04-API_ENDPOINTS.md       # REST API reference
-├── 05-ADMIN_RATE_LIMITING.md # Rate limiting config
-├── COPILOT_GUIDE.md          # AI agent/developer workflow
-├── START_HERE.md             # Quick project overview
-├── INDEX.md                  # Documentation index
-├── IMPROVEMENTS_NEEDED.md    # Roadmap & next steps (NEW!)
-├── README.md                 # This file
+├── README.md
+├── INDEX.md
+├── START_HERE.md
+├── COPILOT_GUIDE.md
+├── IMPROVEMENTS_NEEDED.md
+├── UPLOAD_API_REFERENCE.md
+├── Voice_to_Text_Implementation_Guide.md
 │
 ├── architecture/
-│   ├── COMPLETE_UNDERSTANDING.md  # Full system docs
-│   └── DATABASE_SCHEMA.md         # Database structure
-│
 ├── development/
-│   └── DEVELOPMENT_GUIDE.md       # Development workflow
-│
 ├── guides/
-│   ├── QUICKREF.md               # Quick reference commands
-│   ├── QUICKSTART.md             # Setup guide
-│   └── TROUBLESHOOTING.md        # Common issues & fixes
-│
-├── contribution/
-│   ├── CONTRIBUTING.md           # How to add new features
-│   └── WORKFLOW.md               # Quick development checklist
-│
-└── CHANGELOG.md                  # Version history
+└── contribution/
 ```
 
 ---
 
-## 🔑 Key Features
+## 🔑 What This Project Covers
 
-✅ **RAG Pipeline** - Retrieval-Augmented Generation for document Q&A  
-✅ **Error Tracking** - Sentry integration for monitoring  
-✅ **Structured Logging** - JSON logs with request tracing  
-✅ **Rate Limiting** - Per-user and endpoint-specific limits  
-✅ **Document Tagging** - Flexible multi-tag system  
-✅ **Document Classification** - Semantic document organization  
-✅ **Advanced Search** - Filter by tags and classification  
-✅ **Multi-Provider LLM** - Ollama, Grok, Gemini with fallback  
+✅ Document ingestion and parsing
+✅ Chunking and embeddings in ChromaDB
+✅ Hybrid retrieval and fallback generation
+✅ Role-based access for students, faculty, and admins
+✅ Upload analytics, query logs, and feedback capture
+✅ Trace monitoring and observability
+✅ Voice-to-text input using local Whisper
 
 ---
 
 ## 📊 Architecture Overview
 
 ```
-React Frontend (3000) → Spring Boot (8080) → Python FastAPI (8001)
-                                                    ↓
-                                            ┌──────┴──────┐
-                                            │             │
-                                        ChromaDB      SQLite
-                                        (vectors)    (relational)
+React frontend → Spring Boot proxy → FastAPI backend
+                                       ↓
+                              ChromaDB + SQLite
 ```
 
 ---
@@ -170,5 +114,5 @@ See [guides/TROUBLESHOOTING.md](./guides/TROUBLESHOOTING.md) for more.
 
 ---
 
-**Last Updated:** March 2026  
+**Last Updated:** April 2026  
 **Version:** 2.0.0

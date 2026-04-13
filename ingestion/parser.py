@@ -10,9 +10,45 @@ from pathlib import Path
 from typing import Optional
 
 
+def _clean_pdf_table_cell(cell) -> str:
+    """Normalize a PDF table cell into a single retrieval-friendly line."""
+    if cell is None:
+        return ""
+    text = str(cell).replace("\r", "\n")
+    parts = [part.strip() for part in text.splitlines() if part and part.strip()]
+    return " ".join(parts).strip()
+
+
+def _format_pdf_table(table: list[list]) -> list[str]:
+    """Convert raw table rows into pipe-separated lines."""
+    if not table:
+        return []
+
+    rows = []
+    for row in table:
+        if not row:
+            continue
+        cleaned = [_clean_pdf_table_cell(cell) for cell in row]
+        if any(cleaned):
+            rows.append(cleaned)
+
+    if not rows:
+        return []
+
+    col_count = max(len(row) for row in rows)
+    normalized_rows = [row + [""] * (col_count - len(row)) for row in rows]
+    lines = []
+    for row in normalized_rows:
+        line = " | ".join(row).strip()
+        if line:
+            lines.append(line)
+    return lines
+
+
 def parse_pdf(file_path: str) -> str:
-    """Extract text from a PDF file."""
+    """Extract text from a PDF file with table-aware parsing via pdfplumber."""
     from PyPDF2 import PdfReader
+    import pdfplumber
 
     try:
         reader = PdfReader(file_path)
@@ -28,10 +64,35 @@ def parse_pdf(file_path: str) -> str:
                 )
 
         text_parts = []
-        for page_num, page in enumerate(reader.pages, 1):
-            page_text = page.extract_text()
-            if page_text:
-                text_parts.append(f"[Page {page_num}]\n{page_text}")
+
+        # Primary strategy: pdfplumber text + table extraction
+        try:
+            with pdfplumber.open(file_path) as pdf:
+                for page_num, page in enumerate(pdf.pages, 1):
+                    page_blocks = []
+
+                    page_text = page.extract_text() or ""
+                    if page_text.strip():
+                        page_blocks.append(page_text.strip())
+
+                    tables = page.extract_tables() or []
+                    for table_idx, table in enumerate(tables, 1):
+                        table_lines = _format_pdf_table(table)
+                        if table_lines:
+                            page_blocks.append(f"[Table {table_idx}]\n" + "\n".join(table_lines))
+
+                    if page_blocks:
+                        text_parts.append(f"[Page {page_num}]\n" + "\n\n".join(page_blocks))
+        except Exception:
+            # Fall back to PyPDF2 text extraction if pdfplumber parsing fails.
+            text_parts = []
+
+        if not text_parts:
+            for page_num, page in enumerate(reader.pages, 1):
+                page_text = page.extract_text()
+                if page_text:
+                    text_parts.append(f"[Page {page_num}]\n{page_text}")
+
         return "\n\n".join(text_parts)
     except ValueError as e:
         # Re-raise ValueError for encrypted PDFs (handled in parse_document)

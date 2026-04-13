@@ -8,7 +8,7 @@ import ChatInputArea from './ChatInputArea';
 import TypingIndicator from './TypingIndicator';
 import ChatSidebar from './ChatSidebar';
 import { useAuth } from '../../context/AuthContext';
-import { sendChat, sendAudioMessage, getAnnouncements, getSuggestions } from '../../services/api';
+import { sendChat, sendAudioMessage, getAnnouncements, getSuggestions, submitFeedback } from '../../services/api';
 import chatbotLogo from '../../assets/astrobot-logo.svg';
 
 const CHATBOT_LOGO_URL = '/astrobot-logo.png';
@@ -41,6 +41,7 @@ const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
 
   appendGroup(result?.recent, 'Recent');
   appendGroup(result?.popular, 'Popular');
+  appendGroup(result?.document_based, 'From Uploaded Docs');
   appendGroup(result?.preset, 'Suggested');
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -254,6 +255,7 @@ export default function ChatLayout() {
         content: response.data.response,
         sources: response.data.sources || [],
         citations: response.data.citations || '',
+        traceId: response.data.trace_id || null,
         timestamp: new Date().toISOString(),
       };
 
@@ -365,6 +367,7 @@ export default function ChatLayout() {
             content: response.data.response,
             sources: response.data.sources || [],
             citations: response.data.citations || '',
+            traceId: response.data.trace_id || null,
             timestamp: new Date().toISOString(),
           };
 
@@ -461,6 +464,15 @@ export default function ChatLayout() {
   const handleOpenChat = () => {
     setActiveView('chat');
     setSidebarOpen(false);
+  };
+
+  const handleBotFeedback = async (traceId, rating) => {
+    if (!traceId || !rating) return;
+    try {
+      await submitFeedback(traceId, rating, currentUser.id);
+    } catch (error) {
+      console.error('Error submitting feedback:', error);
+    }
   };
 
   const selectedAnnouncement = announcements.find((item) => item.id === activeAnnouncementId) || announcements[0] || null;
@@ -584,7 +596,10 @@ export default function ChatLayout() {
                             content={msg.content}
                             sources={msg.sources}
                             citations={msg.citations}
+                            traceId={msg.traceId}
                             timestamp={msg.timestamp}
+                            userId={currentUser.id}
+                            onFeedback={handleBotFeedback}
                           />
                         ) : (
                           <UserMessage

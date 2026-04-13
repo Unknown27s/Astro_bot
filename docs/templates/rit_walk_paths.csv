@@ -1,0 +1,9 @@
+edge_id,from_place_id,to_place_id,distance_m,avg_time_sec,is_accessible,has_stairs,indoor,verification_status,notes
+edge_001,rit_main_gate,rit_admin_block,120,95,true,false,false,needs_verification,"Main approach path"
+edge_002,rit_admin_block,rit_library,90,70,true,false,true,needs_verification,"Covered corridor (assumed)"
+edge_003,rit_library,rit_block_a,90,70,true,false,true,needs_verification,"Internal link"
+edge_004,rit_block_a,rit_block_b,40,35,true,false,true,needs_verification,"Inter-block passage"
+edge_005,rit_block_b,rit_block_c,45,40,true,false,true,needs_verification,"Inter-block passage"
+edge_006,rit_block_a,rit_a_101,30,28,true,true,true,needs_verification,"Floor and stair verification pending"
+edge_007,rit_block_a,rit_a_201,45,50,false,true,true,needs_verification,"No lift data yet"
+edge_008,rit_main_gate,rit_bus_bay,60,50,true,false,false,needs_verification,"External walkway"

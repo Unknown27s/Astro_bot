@@ -6,7 +6,7 @@ import chatbotLogo from '../../assets/astrobot-logo.svg';
 
 const CHATBOT_LOGO_URL = '/astrobot-logo.png';
 
-export default function BotMessage({ content, sources = [], citations = '', timestamp }) {
+export default function BotMessage({ content, sources = [], citations = '', timestamp, traceId = null, onFeedback = null }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
@@ -14,6 +14,13 @@ export default function BotMessage({ content, sources = [], citations = '', time
     navigator.clipboard.writeText(content);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleFeedbackClick = async (value) => {
+    setFeedback(value > 0);
+    if (onFeedback && traceId) {
+      await onFeedback(traceId, value);
+    }
   };
 
   return (
@@ -92,7 +99,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
             <Copy className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setFeedback(true)}
+            onClick={() => handleFeedbackClick(1)}
             className={`rounded-lg p-1.5 transition-colors ${feedback === true ? 'bg-emerald-400/20 text-emerald-200' : 'text-slate-300 hover:bg-emerald-400/10 hover:text-emerald-100'
               }`}
             title="Helpful"
@@ -100,7 +107,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
             <ThumbsUp className="h-4 w-4" />
           </button>
           <button
-            onClick={() => setFeedback(false)}
+            onClick={() => handleFeedbackClick(-1)}
             className={`rounded-lg p-1.5 transition-colors ${feedback === false ? 'bg-red-400/20 text-red-200' : 'text-slate-300 hover:bg-red-400/10 hover:text-red-100'
               }`}
             title="Not helpful"

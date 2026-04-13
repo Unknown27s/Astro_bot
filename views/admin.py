@@ -25,10 +25,12 @@ logger = logging.getLogger(__name__)
 from database.db import (
     get_all_documents, delete_document, add_document,
     get_memory_stats, cleanup_expired_memory, clear_all_memory, delete_memory,
+    store_document_question_suggestions,
 )
 from ingestion.parser import parse_document
 from ingestion.chunker import chunk_document
 from ingestion.embedder import store_chunks, delete_doc_chunks, get_collection_stats
+from ingestion.question_suggester import generate_document_questions
 
 
 def render_admin_page():
@@ -134,6 +136,13 @@ def _render_document_management():
                 error_count += 1
                 continue
 
+            suggested_questions = generate_document_questions(
+                uploaded_file.name,
+                text,
+                chunks,
+                limit=10,
+            )
+
             # Record in database
             try:
                 doc_id = add_document(
@@ -158,7 +167,16 @@ def _render_document_management():
             # Store embeddings in ChromaDB
             try:
                 stored = store_chunks(chunks, doc_id)
+                store_document_question_suggestions(
+                    document_id=doc_id,
+                    questions=suggested_questions,
+                    source_hint=uploaded_file.name,
+                )
                 st.success(f"✅ {uploaded_file.name} — {stored} chunks indexed")
+                if suggested_questions:
+                    with st.expander(f"Suggested questions from {uploaded_file.name}", expanded=False):
+                        for question in suggested_questions[:6]:
+                            st.markdown(f"- {question}")
                 success_count += 1
             except Exception as e:
                 st.error(f"❌ Failed to index {uploaded_file.name} in vector database: {str(e)}")

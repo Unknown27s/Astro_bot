@@ -206,7 +206,11 @@ conn.close()
   "doc_id": "doc-123",
   "filename": "course_handbook.pdf",
   "chunks_indexed": 45,
-  "file_size": 1024000
+  "file_size": 1024000,
+  "suggested_questions": [
+    "Can you summarize key points from course handbook?",
+    "What does the section 'Attendance Policy' explain?"
+  ]
 }
 ```
 
