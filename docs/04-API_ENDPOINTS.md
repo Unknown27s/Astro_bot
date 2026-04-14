@@ -16,10 +16,11 @@
 6. [Voice Chat](#voice-chat)
 7. [Suggestions](#suggestions)
 8. [Feedback](#feedback)
-9. [Monitor](#monitor)
-10. [Rate Limits](#rate-limits)
-11. [Error Responses](#error-responses)
-12. [Examples](#examples)
+9. [Memory](#memory)
+10. [Monitor](#monitor)
+11. [Rate Limits](#rate-limits)
+12. [Error Responses](#error-responses)
+13. [Examples](#examples)
 
 ---
 
@@ -446,6 +447,43 @@ curl http://localhost:8000/api/documents | jq
 
 ---
 
+## Chat Routing
+
+### Send Chat Query
+
+**Endpoint:** `POST /api/chat`
+
+**Access:** All authenticated users
+
+**Routing behavior:** The backend now classifies the query before retrieval. Public campus questions prefer official-site chunks, document/policy/technical questions prefer uploaded-document RAG, and mixed/unclear questions fall back to hybrid retrieval.
+
+**Response:** `200 OK`
+```json
+{
+  "response": "...",
+  "sources": [
+    {
+      "source": "Campus Website",
+      "heading": "Admissions",
+      "score": 0.91
+    }
+  ],
+  "citations": "📄 **Campus Website** — Admissions (91% match)",
+  "response_time_ms": 842.4,
+  "route_mode": "official_site"
+}
+```
+
+**Route values:**
+- `official_site` for public campus information
+- `document` for uploaded policies/documents
+- `hybrid` for mixed queries
+- `unclear` when the router cannot confidently choose one source
+
+**Note:** `@Announcement` still bypasses normal routing and formats the message for the announcements feed.
+
+---
+
 ## Announcements
 
 > **Role Access:** `GET` is public (all authenticated users). Posting is via the `/api/chat` endpoint with the `@Announcement` prefix — Admin and Faculty roles only.
@@ -500,7 +538,8 @@ curl http://localhost:8000/api/announcements | jq
   "response": "✅ Announcement generated and posted successfully!\n\n---\n\n📢 **Important Notice**\n\nWe wish to inform all students that...",
   "sources": [],
   "citations": "",
-  "response_time_ms": 1320.5
+  "response_time_ms": 1320.5,
+  "route_mode": "announcement"
 }
 ```
 
@@ -569,7 +608,8 @@ curl http://localhost:8000/api/announcements | jq
   "sources": [],
   "citations": "",
   "response_time_ms": 1042.1,
-  "transcribed_text": "What is the attendance policy"
+  "transcribed_text": "What is the attendance policy",
+  "route_mode": "document"
 }
 ```
 
@@ -607,6 +647,47 @@ curl http://localhost:8000/api/announcements | jq
 
 **Notes:**
 - `document_based` suggestions are generated from uploaded document text/headings and refreshed as new documents are indexed.
+
+---
+
+## Official Site Ingestion
+
+### Fetch and Index a Public Page
+
+**Endpoint:** `POST /api/documents/ingest-url`
+
+**Access:** Admin
+
+**Request:**
+```json
+{
+  "url": "https://www.example.edu/about",
+  "title": "About the College",
+  "uploaded_by": "user-456"
+}
+```
+
+**Notes:**
+- This endpoint fetches one public HTML page, cleans boilerplate, chunks the text, and indexes it locally.
+- The stored chunks are tagged with `source_type=official_site`.
+- The endpoint is proxied through Spring Boot to FastAPI.
+
+**Response:** `200 OK`
+```json
+{
+  "doc_id": "c6f8f946-b74f-4f8a-8d1a-7b4eaf43a03b",
+  "url": "https://www.example.edu/about",
+  "domain": "example.edu",
+  "title": "About the College",
+  "chunks_indexed": 18,
+  "file_size": 14820,
+  "source_type": "official_site",
+  "suggested_questions": [
+    "Can you summarize key points from About the College?",
+    "What does the section 'Admissions' explain?"
+  ]
+}
+```
 
 ---
 
@@ -652,6 +733,66 @@ curl http://localhost:8000/api/announcements | jq
 - `not_helpful_feedback`
 - `helpful_feedback_rate`
 - `daily_feedback` (array with `day`, `helpful`, `not_helpful`, `total`)
+
+---
+
+## Memory
+
+### Get Memory Stats
+
+**Endpoint:** `GET /api/memory/stats`
+
+**Access:** Admin
+
+**Response:** `200 OK`
+```json
+{
+  "enabled": true,
+  "stats": {
+    "total_entries": 42,
+    "avg_usage": 1.8,
+    "by_user": [
+      {
+        "username": "admin",
+        "entries": 12,
+        "avg_usage": 2.1
+      }
+    ]
+  }
+}
+```
+
+### Delete One Memory Entry
+
+**Endpoint:** `DELETE /api/memory/{memory_id}`
+
+**Access:** Admin
+
+**Behavior:** Deletes the memory entry from both storage layers (ChromaDB semantic cache + SQLite metadata) to avoid stale cache hits after deletion.
+
+**Response:** `200 OK`
+```json
+{
+  "deleted": true,
+  "id": "9ffaf3f8-dfdf-4f69-a4f3-7f56da36c9af"
+}
+```
+
+### Cleanup Expired Memory
+
+**Endpoint:** `POST /api/memory/cleanup`
+
+**Access:** Admin
+
+**Behavior:** Removes expired/old cache entries from both cache and metadata layers.
+
+### Clear All Memory
+
+**Endpoint:** `POST /api/memory/clear`
+
+**Access:** Admin
+
+**Behavior:** Clears full conversation memory from ChromaDB and SQLite, then recreates the memory collection.
 
 ---
 

@@ -129,6 +129,11 @@ export default function SettingsPage() {
           {form.llm_mode === 'cloud_only' && 'Uses cloud providers with primary-to-fallback routing.'}
           {form.llm_mode === 'hybrid' && 'Uses primary provider, then fallback, then Ollama as final fallback.'}
         </p>
+        {form.llm_mode === 'local_only' && (
+          <p className="mt-1 text-xs text-amber-200/90">
+            Primary and fallback provider selections are ignored in Local Only mode.
+          </p>
+        )}
       </section>
 
       {form.llm_mode !== 'local_only' && (
@@ -140,6 +145,7 @@ export default function SettingsPage() {
               <select className={inputClass} value={form.primary_provider || 'ollama'} onChange={e => update('primary_provider', e.target.value)}>
                 <option value="ollama">Ollama (Local)</option>
                 <option value="groq">Groq</option>
+                <option value="gemini">Gemini (Google)</option>
               </select>
             </div>
             <div>

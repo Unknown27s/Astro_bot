@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { listDocuments, uploadDocument, deleteDocument, getKnowledgeBaseStats } from '../../services/api';
+import { listDocuments, uploadDocument, ingestOfficialSite, deleteDocument, getKnowledgeBaseStats } from '../../services/api';
 import { Upload, Trash2, FileText } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -9,7 +9,10 @@ export default function DocumentsPage() {
   const [docs, setDocs] = useState([]);
   const [stats, setStats] = useState({ total_chunks: 0 });
   const [uploading, setUploading] = useState(false);
+  const [ingestingUrl, setIngestingUrl] = useState(false);
   const [loadingData, setLoadingData] = useState(true);
+  const [siteUrl, setSiteUrl] = useState('');
+  const [siteTitle, setSiteTitle] = useState('');
 
   const load = async () => {
     setLoadingData(true);
@@ -84,6 +87,34 @@ export default function DocumentsPage() {
     load();
   };
 
+  const handleIngestUrl = async (e) => {
+    e.preventDefault();
+    if (!siteUrl.trim()) {
+      toast.error('Please enter a website URL');
+      return;
+    }
+
+    setIngestingUrl(true);
+    try {
+      const response = await ingestOfficialSite(siteUrl.trim(), siteTitle.trim(), user?.id);
+      const indexed = response.data?.chunks_indexed ?? 0;
+      toast.success(`Indexed official site content (${indexed} chunks)`);
+      setSiteUrl('');
+      setSiteTitle('');
+      load();
+    } catch (err) {
+      let errorMsg = 'Failed to ingest website';
+      if (err.response?.data?.detail) {
+        errorMsg = err.response.data.detail;
+      } else if (err.response?.data?.error) {
+        errorMsg = err.response.data.error;
+      }
+      toast.error(errorMsg);
+    } finally {
+      setIngestingUrl(false);
+    }
+  };
+
   const handleDelete = async (doc) => {
     if (!confirm(`Delete "${doc.original_name}"?`)) return;
     try {
@@ -128,6 +159,41 @@ export default function DocumentsPage() {
             />
           </label>
         </div>
+      </section>
+
+      <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><FileText size={18} /> Ingest Official Site Page</h3>
+            <p className="mt-1 text-sm text-slate-300/80">Fetch one public page from the official college website and index it as a local knowledge source.</p>
+          </div>
+        </div>
+
+        <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3" onSubmit={handleIngestUrl}>
+          <input
+            type="url"
+            value={siteUrl}
+            onChange={(event) => setSiteUrl(event.target.value)}
+            placeholder="https://www.example.edu/about"
+            className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+            aria-label="Official site URL"
+          />
+          <input
+            type="text"
+            value={siteTitle}
+            onChange={(event) => setSiteTitle(event.target.value)}
+            placeholder="Optional page title"
+            className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+            aria-label="Official site title"
+          />
+          <button
+            type="submit"
+            disabled={ingestingUrl}
+            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-300 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {ingestingUrl ? 'Fetching...' : 'Fetch & Index'}
+          </button>
+        </form>
       </section>
 
       {loadingData ? (

@@ -68,6 +68,18 @@ HYDE_MAX_TOKENS = int(os.getenv("HYDE_MAX_TOKENS", "180"))
 HYDE_MAX_CHARS = int(os.getenv("HYDE_MAX_CHARS", "1400"))
 HYDE_TEMPERATURE = float(os.getenv("HYDE_TEMPERATURE", "0.2"))
 
+# ── Official Site Ingestion ──
+OFFICIAL_SITE_ALLOWED_DOMAINS = [
+	domain.strip().lower()
+	for domain in os.getenv("OFFICIAL_SITE_ALLOWED_DOMAINS", "").split(",")
+	if domain.strip()
+]
+OFFICIAL_SITE_TIMEOUT_SECONDS = int(os.getenv("OFFICIAL_SITE_TIMEOUT_SECONDS", "15"))
+OFFICIAL_SITE_USER_AGENT = os.getenv(
+	"OFFICIAL_SITE_USER_AGENT",
+	"AstroBot/2.0 official-site-ingestion",
+)
+
 # ── Supported file types ──
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".xlsx", ".csv", ".pptx", ".html", ".htm"}
 

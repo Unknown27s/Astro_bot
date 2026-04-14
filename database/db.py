@@ -60,9 +60,24 @@ def init_db():
             uploaded_by TEXT,
             uploaded_at TEXT NOT NULL,
             status TEXT DEFAULT 'processed',
+            source_type TEXT DEFAULT 'uploaded',
+            source_domain TEXT DEFAULT '',
+            source_url TEXT DEFAULT '',
             FOREIGN KEY (uploaded_by) REFERENCES users(id)
         )
     """)
+
+    def _ensure_column(table_name: str, column_name: str, column_ddl: str):
+        existing_columns = {
+            row[1]
+            for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
+        }
+        if column_name not in existing_columns:
+            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
+
+    _ensure_column("documents", "source_type", "TEXT DEFAULT 'uploaded'")
+    _ensure_column("documents", "source_domain", "TEXT DEFAULT ''")
+    _ensure_column("documents", "source_url", "TEXT DEFAULT ''")
 
     # ── Document question suggestions (generated from uploaded content) ──
     cursor.execute("""
@@ -137,6 +152,7 @@ def init_db():
             status TEXT NOT NULL,
             query_preview TEXT DEFAULT '',
             response_time_ms REAL,
+            route_mode TEXT DEFAULT '',
             retrieval_top_score REAL,
             retrieval_avg_score REAL,
             retrieval_mode TEXT DEFAULT '',
@@ -165,6 +181,8 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_trace_events_endpoint
         ON trace_events(endpoint)
     """)
+
+    _ensure_column("trace_events", "route_mode", "TEXT DEFAULT ''")
 
     # ── Conversation memory table (for semantic caching) ──
     cursor.execute("""
@@ -409,13 +427,38 @@ def delete_user(user_id: str) -> bool:
 # DOCUMENT CRUD
 # ═══════════════════════════════════════════
 
-def add_document(filename: str, original_name: str, file_type: str, file_size: int, chunk_count: int, uploaded_by: str) -> str:
+def add_document(
+    filename: str,
+    original_name: str,
+    file_type: str,
+    file_size: int,
+    chunk_count: int,
+    uploaded_by: str,
+    source_type: str = "uploaded",
+    source_domain: str = "",
+    source_url: str = "",
+) -> str:
     """Record a new document. Returns document ID."""
     doc_id = str(uuid.uuid4())
     conn = get_connection()
     conn.execute(
-        "INSERT INTO documents (id, filename, original_name, file_type, file_size, chunk_count, uploaded_by, uploaded_at) VALUES (?,?,?,?,?,?,?,?)",
-        (doc_id, filename, original_name, file_type, file_size, chunk_count, uploaded_by, datetime.now().isoformat()),
+        """INSERT INTO documents
+           (id, filename, original_name, file_type, file_size, chunk_count,
+            uploaded_by, uploaded_at, source_type, source_domain, source_url)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            doc_id,
+            filename,
+            original_name,
+            file_type,
+            file_size,
+            chunk_count,
+            uploaded_by,
+            datetime.now().isoformat(),
+            source_type,
+            source_domain,
+            source_url,
+        ),
     )
     conn.commit()
     conn.close()
@@ -499,6 +542,7 @@ def log_trace_event(
     username: str = "",
     query_preview: str = "",
     response_time_ms: float = 0.0,
+    route_mode: str = "",
     retrieval_top_score: Optional[float] = None,
     retrieval_avg_score: Optional[float] = None,
     retrieval_mode: str = "",
@@ -518,10 +562,10 @@ def log_trace_event(
     conn.execute(
         """INSERT INTO trace_events
            (id, trace_id, endpoint, user_id, username, status, query_preview,
-            response_time_ms, retrieval_top_score, retrieval_avg_score, retrieval_mode,
+            response_time_ms, route_mode, retrieval_top_score, retrieval_avg_score, retrieval_mode,
             hyde_applied, chunks_count, from_memory, provider, model, fallback_chain,
             error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             event_id,
             trace_id,
@@ -531,6 +575,7 @@ def log_trace_event(
             status,
             (query_preview or "")[:220],
             float(response_time_ms or 0.0),
+            route_mode or "",
             retrieval_top_score,
             retrieval_avg_score,
             retrieval_mode or "",

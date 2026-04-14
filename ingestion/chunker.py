@@ -84,7 +84,17 @@ def _fixed_size_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = C
     return chunks
 
 
-def chunk_document(text: str, source_name: str = "", chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[dict]:
+def chunk_document(
+    text: str,
+    source_name: str = "",
+    chunk_size: int = CHUNK_SIZE,
+    overlap: int = CHUNK_OVERLAP,
+    source_type: str = "uploaded",
+    source_url: str = "",
+    source_domain: str = "",
+    page_title: str = "",
+    extra_metadata: Optional[dict] = None,
+) -> list[dict]:
     """
     Hybrid chunking: first split by structure (headings), then apply fixed-size chunking.
     
@@ -117,6 +127,11 @@ def chunk_document(text: str, source_name: str = "", chunk_size: int = CHUNK_SIZ
                     "source": source_name,
                     "heading": heading.lstrip("#").strip() if heading else "",
                     "chunk_index": chunk_index,
+                    "source_type": source_type,
+                    "source_url": source_url,
+                    "source_domain": source_domain,
+                    "page_title": page_title,
+                    **(extra_metadata or {}),
                 },
             })
             chunk_index += 1

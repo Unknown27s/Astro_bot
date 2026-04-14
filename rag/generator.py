@@ -6,8 +6,8 @@ Falls back to context-only mode if no provider is available.
 
 import logging
 import time
-from config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT, CONV_ENABLED, CONV_MATCH_THRESHOLD
-from rag.providers.manager import get_manager, reset_manager
+import config as runtime_config
+from rag.providers.manager import get_manager
 from rag.memory import query_memory, add_memory_entry
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def is_llm_available() -> bool:
     return mgr.is_any_available()
 
 
-def generate_response(query: str, context: str, user_id: str = None, sources: list = None, trace=None, obs_trace=None) -> dict:
+def generate_response(query: str, context: str, user_id: str = None, sources: list = None, trace=None, obs_trace=None, route_mode: str = None) -> dict:
     """
     Generate a response using the configured LLM provider(s) with retrieved context.
     Checks conversation memory first for similar cached answers.
@@ -53,6 +53,11 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
         Dictionary with keys: response (str), from_memory (bool), memory_id (str or None)
     """
     start_time = time.time()
+    conv_enabled = runtime_config.CONV_ENABLED
+    conv_match_threshold = runtime_config.CONV_MATCH_THRESHOLD
+    system_prompt = runtime_config.SYSTEM_PROMPT
+    model_temperature = runtime_config.MODEL_TEMPERATURE
+    model_max_tokens = runtime_config.MODEL_MAX_TOKENS
 
     generation_span = obs_trace.start_span(
         name="generation.pipeline",
@@ -62,20 +67,20 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
             "sources_count": len(sources or []),
         },
         metadata={
-            "memory_enabled": CONV_ENABLED,
+            "memory_enabled": conv_enabled,
         },
     ) if obs_trace else None
 
     # Step 1: Check conversation memory if enabled
-    if CONV_ENABLED and query:
+    if conv_enabled and query:
         memory_span = obs_trace.start_span(
             name="memory.lookup",
             input_payload={"query_preview": query[:120]},
-            metadata={"threshold": CONV_MATCH_THRESHOLD},
+            metadata={"threshold": conv_match_threshold},
         ) if obs_trace else None
         memory_start = time.time()
         try:
-            memory_result = query_memory(query, user_id=user_id)
+            memory_result = query_memory(query, user_id=user_id, route_mode=route_mode)
             memory_ms = (time.time() - memory_start) * 1000
 
             if memory_result:
@@ -87,7 +92,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
                     trace.record_memory_check(
                         hit=True,
                         best_similarity=memory_result.get("similarity"),
-                        threshold=CONV_MATCH_THRESHOLD,
+                        threshold=conv_match_threshold,
                         time_ms=memory_ms,
                     )
 
@@ -119,7 +124,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
                     trace.record_memory_check(
                         hit=False,
                         best_similarity=None,
-                        threshold=CONV_MATCH_THRESHOLD,
+                        threshold=conv_match_threshold,
                         time_ms=memory_ms,
                     )
                 if memory_span:
@@ -136,7 +141,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
                 trace.record_memory_check(
                     hit=False,
                     best_similarity=None,
-                    threshold=CONV_MATCH_THRESHOLD,
+                    threshold=conv_match_threshold,
                     time_ms=(time.time() - memory_start) * 1000,
                 )
             if memory_span:
@@ -167,7 +172,7 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
     # Record prompt construction in trace
     if trace:
         trace.record_prompt(
-            system_prompt=SYSTEM_PROMPT,
+            system_prompt=system_prompt,
             user_message=user_message,
             context_chars=len(context),
         )
@@ -176,15 +181,15 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
     llm_span = obs_trace.start_span(
         name="llm.generate",
         input_payload={"query_preview": query[:120]},
-        metadata={"temperature": MODEL_TEMPERATURE, "max_tokens": MODEL_MAX_TOKENS},
+        metadata={"temperature": model_temperature, "max_tokens": model_max_tokens},
     ) if obs_trace else None
     gen_start = time.time()
 
     result = mgr.generate(
-        system_prompt=SYSTEM_PROMPT,
+        system_prompt=system_prompt,
         user_message=user_message,
-        temperature=MODEL_TEMPERATURE,
-        max_tokens=MODEL_MAX_TOKENS,
+        temperature=model_temperature,
+        max_tokens=model_max_tokens,
         trace=trace,
     )
 
@@ -211,13 +216,14 @@ def generate_response(query: str, context: str, user_id: str = None, sources: li
         result = _fallback_response(query, context)
 
     # Step 3: Store in memory for future queries (if enabled)
-    if CONV_ENABLED and query and result:
+    if conv_enabled and query and result:
         try:
             memory_entry = add_memory_entry(
                 query=query,
                 response=result,
                 sources=sources or [],
-                user_id=user_id
+                user_id=user_id,
+                route_mode=route_mode,
             )
             if generation_span:
                 generation_span.end(

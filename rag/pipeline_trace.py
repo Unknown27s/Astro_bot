@@ -116,6 +116,9 @@ class PipelineTrace:
         self.top_k = None
         self.search_time_ms = None
         self.retrieved_chunks = []   # list of dicts
+        self.route_mode = None
+        self.route_confidence = None
+        self.route_reason = None
 
         self.context_char_count = None
         self.system_prompt_preview = None
@@ -153,6 +156,12 @@ class PipelineTrace:
         self.collection_size = collection_size
         self.top_k = top_k
         self.search_time_ms = time_ms
+
+    def record_route(self, route_mode: str, confidence: float = None, reason: str = None):
+        """Record the query routing decision."""
+        self.route_mode = route_mode
+        self.route_confidence = confidence
+        self.route_reason = reason
 
     def record_chunk(self, rank: int, source: str, heading: str, similarity: float,
                      text: str, distance: float = None):
@@ -214,9 +223,18 @@ class PipelineTrace:
                 preview_str = ", ".join(f"{v:.4f}" for v in self.embedding_preview)
                 lines.append(_kv("Vector Preview", f"[{preview_str}, ...]"))
 
-        # ── Step 3: Memory Check ──
+        # ── Step 3: Query Routing ──
+        if self.route_mode:
+            lines.append(_section("Step 3 | [ROUTE]", "QUERY ROUTING"))
+            lines.append(_kv("Mode", self.route_mode))
+            if self.route_confidence is not None:
+                lines.append(_kv("Confidence", f"{self.route_confidence:.0%}"))
+            if self.route_reason:
+                lines.append(_kv("Reason", self.route_reason))
+
+        # ── Step 4: Memory Check ──
         if self.memory_checked:
-            lines.append(_section("Step 3 | [CACHE]", "SEMANTIC MEMORY CHECK", self.memory_time_ms))
+            lines.append(_section("Step 4 | [CACHE]", "SEMANTIC MEMORY CHECK", self.memory_time_ms))
             if self.memory_hit:
                 lines.append(_kv("Result", f"{_GREEN}[HIT] CACHE HIT{_RESET}"))
                 lines.append(_kv("Action", "Returning cached response -- skipping LLM"))
@@ -227,16 +245,16 @@ class PipelineTrace:
                 lines.append(_kv("Best Match", f"{sim_str} similarity (threshold: {thr_str})"))
                 lines.append(_kv("Action", "Proceeding to LLM generation"))
 
-        # ── Step 4: ChromaDB Vector Search ──
+        # ── Step 5: ChromaDB Vector Search ──
         if self.collection_size is not None:
-            lines.append(_section("Step 4 | [SEARCH]", "CHROMADB VECTOR SEARCH", self.search_time_ms))
+            lines.append(_section("Step 5 | [SEARCH]", "CHROMADB VECTOR SEARCH", self.search_time_ms))
             lines.append(_kv("Collection Size", f"{self.collection_size:,} vectors stored"))
             lines.append(_kv("Search Strategy", f"Cosine similarity, top-{self.top_k}"))
             lines.append(_kv("Chunks Found", f"{len(self.retrieved_chunks)} results"))
 
-        # ── Step 5: Retrieved Chunks ──
+        # ── Step 6: Retrieved Chunks ──
         if self.retrieved_chunks:
-            lines.append(_section("Step 5 | [CHUNKS]", "RETRIEVED CHUNKS (Ranked by Relevance)"))
+            lines.append(_section("Step 6 | [CHUNKS]", "RETRIEVED CHUNKS (Ranked by Relevance)"))
             for chunk in self.retrieved_chunks:
                 lines.append(_chunk_block(
                     rank=chunk["rank"],
@@ -247,16 +265,16 @@ class PipelineTrace:
                     distance=chunk.get("distance"),
                 ))
 
-        # ── Step 6: Prompt Construction ──
+        # ── Step 7: Prompt Construction ──
         if self.context_char_count is not None:
-            lines.append(_section("Step 6 | [PROMPT]", "LLM PROMPT CONSTRUCTION"))
+            lines.append(_section("Step 7 | [PROMPT]", "LLM PROMPT CONSTRUCTION"))
             lines.append(_kv("System Prompt", f'"{self.system_prompt_preview}..."'))
             lines.append(_kv("Context Size", f"{self.context_char_count:,} characters from {len(self.retrieved_chunks)} chunks"))
             lines.append(_kv("User Message", f'"{self.user_message_preview}..."'))
 
-        # ── Step 7: LLM Generation ──
+        # ── Step 8: LLM Generation ──
         if self.provider_used:
-            lines.append(_section("Step 7 | [LLM]", "LLM GENERATION", self.generation_time_ms))
+            lines.append(_section("Step 8 | [LLM]", "LLM GENERATION", self.generation_time_ms))
             lines.append(_kv("Provider", f"{_GREEN}{self.provider_used}{_RESET}"))
             lines.append(_kv("Model", self.model_used))
             lines.append(_kv("Temperature", self.temperature))

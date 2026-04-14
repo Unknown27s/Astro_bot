@@ -4,6 +4,35 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.7] - 2026-04-14
+
+### 🐛 Bug Fixes
+
+#### AI Settings Live Reload and Provider Selection
+- Fixed settings reload so both runtime config modules are reloaded after saving Admin AI settings.
+- Fixed generation pipeline to read live prompt/temperature/token settings at request time instead of stale import-time constants.
+- Added Gemini as a selectable primary provider in the React AI Settings page.
+- Added explicit UI hint that provider priority is ignored when `LLM_MODE=local_only`.
+- Updated files:
+  - `api_server.py`
+  - `rag/generator.py`
+  - `react-frontend/src/pages/admin/SettingsPage.jsx`
+
+## [2.3.6] - 2026-04-14
+
+### 🐛 Bug Fixes
+
+#### Memory Cache Deletion Consistency
+- Fixed conversation memory delete/cleanup/clear API flow so cache operations now remove entries from both storage layers (ChromaDB + SQLite).
+- Root cause: endpoints were deleting only SQLite rows while semantic cache lookups still hit ChromaDB, causing deleted items to appear again.
+- Updated file:
+  - `api_server.py`
+
+### 📚 Documentation Updates
+- Added Memory API section and clarified cross-store deletion behavior.
+- Updated file:
+  - `docs/04-API_ENDPOINTS.md`
+
 ## [2.3.5] - 2026-04-11
 
 ### 🐛 Bug Fixes

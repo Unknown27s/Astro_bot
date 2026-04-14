@@ -20,6 +20,13 @@ Core runtime path:
 - Embedding + vector DB: `ingestion/embedder.py`
 - Generation: `rag/generator.py`
 
+Official-site ingestion path:
+
+- API entry: `POST /api/documents/ingest-url` in `api_server.py`
+- Fetch + HTML cleanup: `ingestion/web_ingest.py`
+- Chunking: `ingestion/chunker.py`
+- Storage: `ingestion/embedder.py`
+
 ---
 
 ## 2. Document Side (How Stored Data Becomes Searchable)
@@ -48,11 +55,13 @@ This is implemented by `store_chunks()` in `ingestion/embedder.py`.
 
 When a user sends a question to `POST /api/chat`:
 
-1. API calls `retrieve_context(query, ...)`.
-2. `retrieve_context()` calls:
+1. API classifies the query route first.
+2. Public campus questions prefer official-site chunks, document/policy questions prefer uploaded-document chunks, and mixed queries can fall back to hybrid retrieval.
+3. API calls `retrieve_context(query, ...)` with the selected source scope.
+4. `retrieve_context()` calls:
    - `generate_embeddings([query])[0]`
-3. `generate_embeddings()` uses Sentence Transformers model from config (`EMBEDDING_MODEL`, default `all-MiniLM-L6-v2`).
-4. Embeddings are generated with `normalize_embeddings=True`.
+5. `generate_embeddings()` uses Sentence Transformers model from config (`EMBEDDING_MODEL`, default `all-MiniLM-L6-v2`).
+6. Embeddings are generated with `normalize_embeddings=True`.
 
 So the query text becomes a dense float vector, typically 384 dimensions for `all-MiniLM-L6-v2`.
 

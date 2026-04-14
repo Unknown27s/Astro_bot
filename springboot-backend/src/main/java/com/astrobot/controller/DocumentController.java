@@ -32,6 +32,17 @@ public class DocumentController {
         }
     }
 
+    @PostMapping("/ingest-url")
+    public ResponseEntity<?> ingestUrl(@RequestBody Map<String, Object> request) {
+        try {
+            Map<String, Object> result = pythonApi.ingestOfficialSite(request);
+            return ResponseEntity.ok(result);
+        } catch (WebClientResponseException e) {
+            return ResponseEntity.status(e.getStatusCode())
+                    .body(Map.of("error", e.getResponseBodyAsString()));
+        }
+    }
+
     @GetMapping
     public ResponseEntity<?> list() {
         try {

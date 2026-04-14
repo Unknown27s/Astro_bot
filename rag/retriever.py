@@ -3,6 +3,7 @@ IMS AstroBot — RAG Retriever
 Performs semantic search against ChromaDB to find relevant document chunks.
 """
 
+import json
 import math
 import re
 import threading
@@ -28,16 +29,7 @@ from config import (
 
 _TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 _BM25_LOCK = threading.Lock()
-_BM25_CACHE = {
-    "count": -1,
-    "ids": [],
-    "documents": [],
-    "metadatas": [],
-    "tf": [],
-    "doc_len": [],
-    "avgdl": 0.0,
-    "idf": {},
-}
+_BM25_CACHE: dict[str, dict] = {}
 
 _HYDE_SYSTEM_PROMPT = (
     "You are a retrieval helper. "
@@ -57,14 +49,22 @@ def _normalize_bm25(score: float, max_score: float) -> float:
     return min(max(score / max_score, 0.0), 1.0)
 
 
-def _build_bm25_cache(collection):
+def _cache_key(where: dict | None) -> str:
+    if not where:
+        return "__all__"
+    return json.dumps(where, sort_keys=True, ensure_ascii=True)
+
+
+def _build_bm25_cache(collection, where: dict | None = None):
     count = collection.count()
+    key = _cache_key(where)
     with _BM25_LOCK:
-        if _BM25_CACHE["count"] == count and _BM25_CACHE["ids"]:
-            return _BM25_CACHE
+        existing = _BM25_CACHE.get(key)
+        if existing and existing.get("count") == count and existing.get("ids"):
+            return existing
 
         if count == 0:
-            _BM25_CACHE.update({
+            empty_cache = {
                 "count": 0,
                 "ids": [],
                 "documents": [],
@@ -73,10 +73,11 @@ def _build_bm25_cache(collection):
                 "doc_len": [],
                 "avgdl": 0.0,
                 "idf": {},
-            })
-            return _BM25_CACHE
+            }
+            _BM25_CACHE[key] = empty_cache
+            return empty_cache
 
-        all_rows = collection.get(include=["documents", "metadatas"])
+        all_rows = collection.get(where=where, include=["documents", "metadatas"])
         ids = all_rows.get("ids", []) or []
         documents = all_rows.get("documents", []) or []
         metadatas = all_rows.get("metadatas", []) or []
@@ -100,7 +101,7 @@ def _build_bm25_cache(collection):
             for term, freq in df.items()
         }
 
-        _BM25_CACHE.update({
+        cache = {
             "count": count,
             "ids": ids,
             "documents": documents,
@@ -109,13 +110,14 @@ def _build_bm25_cache(collection):
             "doc_len": doc_len,
             "avgdl": avgdl,
             "idf": idf,
-        })
-        return _BM25_CACHE
+        }
+        _BM25_CACHE[key] = cache
+        return cache
 
 
-def _bm25_rank(query: str, top_k: int, k1: float = 1.5, b: float = 0.75) -> list[tuple[int, float]]:
-    cache = _BM25_CACHE
-    if not cache["documents"]:
+def _bm25_rank(query: str, top_k: int, k1: float = 1.5, b: float = 0.75, where: dict | None = None) -> list[tuple[int, float]]:
+    cache = _BM25_CACHE.get(_cache_key(where), {})
+    if not cache.get("documents"):
         return []
 
     q_terms = _tokenize(query)
@@ -221,11 +223,12 @@ def _merge_hyde_chunks(base_chunks: list[dict], hyde_chunks: list[dict], top_k: 
     return reranked[:top_k]
 
 
-def _dense_retrieve(collection, query_embedding, n_results: int) -> tuple[list[dict], float]:
+def _dense_retrieve(collection, query_embedding, n_results: int, where: dict | None = None) -> tuple[list[dict], float]:
     search_start = time.time()
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=n_results,
+        where=where,
         include=["documents", "metadatas", "distances"],
     )
     search_ms = (time.time() - search_start) * 1000
@@ -263,6 +266,7 @@ def retrieve_context(
     trace=None,
     obs_trace=None,
     _allow_hyde: bool = True,
+    source_type: str | None = None,
 ) -> list[dict]:
     """
     Retrieve the most relevant document chunks for a given query.
@@ -318,7 +322,8 @@ def retrieve_context(
     # Search ChromaDB (dense retrieval)
     collection_size = collection.count()
     dense_n = min(max(top_k, HYBRID_DENSE_CANDIDATES), collection_size)
-    dense_chunks, search_ms = _dense_retrieve(collection, query_embedding, dense_n)
+    where_filter = {"source_type": source_type} if source_type else None
+    dense_chunks, search_ms = _dense_retrieve(collection, query_embedding, dense_n, where=where_filter)
 
     search_span = obs_trace.start_span(
         name="vector_search.chromadb",
@@ -346,8 +351,12 @@ def retrieve_context(
         ) if obs_trace else None
 
         bm_start = time.time()
-        cache = _build_bm25_cache(collection)
-        bm_ranked = _bm25_rank(query, top_k=min(max(top_k, HYBRID_BM25_CANDIDATES), len(cache["documents"])))
+        cache = _build_bm25_cache(collection, where=where_filter)
+        bm_ranked = _bm25_rank(
+            query,
+            top_k=min(max(top_k, HYBRID_BM25_CANDIDATES), len(cache["documents"])),
+            where=where_filter,
+        )
         bm_ms = (time.time() - bm_start) * 1000
         if bm25_span:
             bm25_span.end(metadata={"elapsed_ms": round(bm_ms, 2), "hits": len(bm_ranked)})
@@ -432,6 +441,7 @@ def retrieve_context(
                     trace=None,
                     obs_trace=None,
                     _allow_hyde=False,
+                    source_type=source_type,
                 )
 
                 if hyde_search_span:

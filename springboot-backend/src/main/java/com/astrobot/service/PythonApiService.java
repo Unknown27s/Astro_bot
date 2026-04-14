@@ -146,6 +146,16 @@ public class PythonApiService {
                 .block();
     }
 
+    public Map<String, Object> ingestOfficialSite(Map<String, Object> request) {
+        return client.post()
+                .uri("/api/documents/ingest-url")
+                .bodyValue(request)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
     public List<Map<String, Object>> listDocuments() {
         return client.get()
                 .uri("/api/documents")

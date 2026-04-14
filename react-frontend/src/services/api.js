@@ -59,6 +59,13 @@ export const uploadDocument = (file, uploadedBy) => {
   return fileApi.post('/documents/upload', formData);
 };
 
+export const ingestOfficialSite = (url, title, uploadedBy) =>
+  api.post('/documents/ingest-url', {
+    url,
+    title,
+    uploaded_by: uploadedBy,
+  });
+
 export const listDocuments = () => api.get('/documents');
 
 export const deleteDocument = (docId) => api.delete(`/documents/${docId}`);

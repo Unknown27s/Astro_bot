@@ -65,6 +65,7 @@ This index points to the current AstroBot documentation first and keeps older ph
 2. [contribution/CONTRIBUTING.md](contribution/CONTRIBUTING.md)
 3. [contribution/WORKFLOW.md](contribution/WORKFLOW.md)
 4. [development/LANGFUSE_INTEGRATION_GUIDE.md](development/LANGFUSE_INTEGRATION_GUIDE.md)
+5. [proposal_feature/official_site_ingestion_plan.md](proposal_feature/official_site_ingestion_plan.md)
 
 ### Retrieval and document pipeline
 1. [architecture/QUERY_TO_VECTOR_SEARCH.md](architecture/QUERY_TO_VECTOR_SEARCH.md)

@@ -51,12 +51,13 @@ from database.db import (
     toggle_user_active, delete_user, add_document, get_all_documents,
     delete_document, log_query, get_query_logs, get_analytics, get_connection, log_feedback,
     log_trace_event, get_trace_events, get_trace_event_summary,
-    store_memory, delete_memory, cleanup_expired_memory, invalidate_memory_by_source,
-    get_memory_stats, clear_all_memory,
+    store_memory, invalidate_memory_by_source,
+    get_memory_stats,
     store_document_question_suggestions,
     get_all_rate_limits, get_rate_limit, update_rate_limit, toggle_rate_limit, reset_rate_limits_to_default,
     get_suggestions, create_announcement, get_recent_announcements,
 )
+from rag.memory import delete_memory_entry, cleanup_old_memory, clear_all_memory as clear_all_cache_memory
 from tests.config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
     CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED,
@@ -143,6 +144,23 @@ def get_all_rate_limits_cached():
     return get_all_rate_limits()
 
 
+def _route_query(query: str):
+    from rag.query_router import classify_query_route
+
+    return classify_query_route(query)
+
+
+def _search_query_with_history(user_id: str, query: str) -> str:
+    from rag.conversation_history import get_history
+
+    history = get_history(user_id)
+    search_query = query
+    if history:
+        previous_queries = " ".join([q for q, r in history])
+        search_query = f"{previous_queries} {query}"
+    return search_query
+
+
 # ═══════════════════════════════════════════════════════
 # REQUEST / RESPONSE MODELS
 # ═══════════════════════════════════════════════════════
@@ -167,6 +185,7 @@ class ChatResponse(BaseModel):
     sources: list[dict]
     citations: str
     response_time_ms: float
+    route_mode: Optional[str] = None
     transcribed_text: Optional[str] = None
     trace_id: Optional[str] = None
 
@@ -175,6 +194,11 @@ class FeedbackRequest(BaseModel):
     rating: int  # 1 helpful, -1 not helpful
     user_id: Optional[str] = None
     comment: Optional[str] = None
+
+class IngestUrlRequest(BaseModel):
+    url: str
+    title: Optional[str] = None
+    uploaded_by: Optional[str] = None
 
 class CreateUserRequest(BaseModel):
     username: str
@@ -272,6 +296,7 @@ def api_chat(req: ChatRequest, request: Request):
     from rag.pipeline_trace import PipelineTrace
 
     start_time = time.time()
+    route = _route_query(req.query)
     obs_trace = start_observation(
         name="api.chat",
         user_id=req.user_id,
@@ -282,6 +307,7 @@ def api_chat(req: ChatRequest, request: Request):
         metadata={
             "endpoint": "/api/chat",
             "voice": False,
+            "route_mode": route.mode,
         },
     )
 
@@ -338,6 +364,7 @@ def api_chat(req: ChatRequest, request: Request):
                     status="ok",
                     query_preview=req.query,
                     response_time_ms=elapsed_ms,
+                    route_mode="announcement",
                     retrieval_mode="announcement",
                     chunks_count=0,
                     provider="",
@@ -355,17 +382,11 @@ def api_chat(req: ChatRequest, request: Request):
 
         # ── Pipeline Trace (terminal transparency for jury demo) ──
         trace = PipelineTrace(query=req.query, username=req.username)
+        trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
         # Step 1: Retrieve relevant chunks
-        from rag.conversation_history import get_history
-        history = get_history(req.user_id)
-        search_query = req.query
-        if history:
-            # Extract previous queries to provide context for vector search
-            previous_queries = " ".join([q for q, r in history])
-            search_query = f"{previous_queries} {req.query}"
-
-        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace)
+        search_query = _search_query_with_history(req.user_id, req.query)
+        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
 
         # Step 2: Format context for LLM
         context = format_context_for_llm(chunks)
@@ -378,6 +399,7 @@ def api_chat(req: ChatRequest, request: Request):
             sources=[c.get("source", "") for c in chunks],
             trace=trace,
             obs_trace=obs_trace,
+            route_mode=route.memory_scope,
         )
 
         # Extract response from dict
@@ -466,6 +488,7 @@ def api_chat(req: ChatRequest, request: Request):
                 status="ok",
                 query_preview=req.query,
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode,
                 retrieval_top_score=max(retrieval_scores) if retrieval_scores else None,
                 retrieval_avg_score=(sum(retrieval_scores) / len(retrieval_scores)) if retrieval_scores else None,
                 retrieval_mode=retrieval_mode,
@@ -484,6 +507,7 @@ def api_chat(req: ChatRequest, request: Request):
             sources=chunks,
             citations=citations,
             response_time_ms=round(elapsed_ms, 1),
+            route_mode=route.mode,
             trace_id=obs_trace.trace_id,
         )
     except HTTPException as exc:
@@ -504,6 +528,7 @@ def api_chat(req: ChatRequest, request: Request):
                 status="http_error",
                 query_preview=req.query,
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode,
                 error_message=str(exc.detail),
             )
         except Exception as event_exc:
@@ -526,6 +551,7 @@ def api_chat(req: ChatRequest, request: Request):
                 status="error",
                 query_preview=req.query,
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode,
                 error_message=str(exc),
             )
         except Exception as event_exc:
@@ -549,6 +575,7 @@ def api_chat_audio(
     from rag.voice_to_text import transcribe_audio
 
     start_time = time.time()
+    route = None
     obs_trace = start_observation(
         name="api.chat.audio",
         user_id=user_id,
@@ -559,6 +586,7 @@ def api_chat_audio(
         metadata={
             "endpoint": "/api/chat/audio",
             "voice": True,
+            "route_mode": "pending",
         },
     )
 
@@ -584,20 +612,15 @@ def api_chat_audio(
             raise HTTPException(status_code=500, detail=f"Audio transcription failed: {error}")
 
         logger.info(f"User {username} spoke: {transcribed_text}")
+        route = _route_query(transcribed_text)
 
         # ── Pipeline Trace (terminal transparency for jury demo) ──
         trace = PipelineTrace(query=f"[🎤 VOICE] {transcribed_text}", username=username)
+        trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
         # Generate RAG response based on transcribed text
-        from rag.conversation_history import get_history
-        history = get_history(user_id)
-        search_query = transcribed_text
-        if history:
-            # Extract previous queries to provide context for vector search
-            previous_queries = " ".join([q for q, r in history])
-            search_query = f"{previous_queries} {transcribed_text}"
-
-        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace)
+        search_query = _search_query_with_history(user_id, transcribed_text)
+        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
         context = format_context_for_llm(chunks)
 
         gen_result = generate_response(
@@ -607,6 +630,7 @@ def api_chat_audio(
             sources=[c.get("source", "") for c in chunks],
             trace=trace,
             obs_trace=obs_trace,
+            route_mode=route.memory_scope,
         )
 
         response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
@@ -674,6 +698,7 @@ def api_chat_audio(
                 status="ok",
                 query_preview=transcribed_text,
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode,
                 retrieval_top_score=max(retrieval_scores) if retrieval_scores else None,
                 retrieval_avg_score=(sum(retrieval_scores) / len(retrieval_scores)) if retrieval_scores else None,
                 retrieval_mode=retrieval_mode,
@@ -693,6 +718,7 @@ def api_chat_audio(
             citations=citations,
             response_time_ms=round(elapsed_ms, 1),
             transcribed_text=transcribed_text,
+            route_mode=route.mode,
             trace_id=obs_trace.trace_id,
         )
     except HTTPException as exc:
@@ -713,6 +739,7 @@ def api_chat_audio(
                 status="http_error",
                 query_preview="",
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode if route else "",
                 error_message=str(exc.detail),
             )
         except Exception as event_exc:
@@ -735,6 +762,7 @@ def api_chat_audio(
                 status="error",
                 query_preview="",
                 response_time_ms=elapsed_ms,
+                route_mode=route.mode if route else "",
                 error_message=str(exc),
             )
         except Exception as event_exc:
@@ -944,6 +972,90 @@ def api_upload_document(
         "filename": file.filename,
         "chunks_indexed": stored,
         "file_size": len(content),
+        "suggested_questions": suggested_questions[:6],
+    }
+
+
+@app.post("/api/documents/ingest-url")
+@limiter.limit("10/minute")
+def api_ingest_document_url(req: IngestUrlRequest, request: Request):
+    """Fetch an official-site page, convert it into chunks, and index it locally."""
+    from ingestion.web_ingest import fetch_official_site_page
+    from ingestion.chunker import chunk_document
+    from ingestion.embedder import store_chunks
+    from ingestion.question_suggester import generate_document_questions
+
+    if req.uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (req.uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {req.uploaded_by} not found")
+
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can ingest official-site pages")
+
+    page = fetch_official_site_page(req.url)
+    if not page.get("ok"):
+        raise HTTPException(status_code=422, detail=page.get("error", "Failed to ingest website page"))
+
+    text = page["text"]
+    chunks = chunk_document(
+        text,
+        source_name=req.title or page["title"],
+        source_type="official_site",
+        source_url=page["url"],
+        source_domain=page["domain"],
+        page_title=page["title"],
+    )
+    if not chunks:
+        raise HTTPException(status_code=422, detail="No chunks generated from website page")
+
+    suggested_questions = generate_document_questions(req.title or page["title"], text, chunks, limit=10)
+
+    try:
+        doc_id = add_document(
+            filename=f"web_{page['domain']}_{int(time.time())}.html",
+            original_name=req.title or page["title"],
+            file_type="web",
+            file_size=page["file_size"],
+            chunk_count=len(chunks),
+            uploaded_by=req.uploaded_by,
+            source_type="official_site",
+            source_domain=page["domain"],
+            source_url=page["url"],
+        )
+    except Exception as exc:
+        logger.error(f"Database error while ingesting website page: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to record website page in database: {str(exc)}")
+
+    try:
+        stored = store_chunks(chunks, doc_id)
+    except Exception as exc:
+        logger.error(f"ChromaDB error for website doc {doc_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to index website page in vector database: {str(exc)}")
+
+    try:
+        store_document_question_suggestions(
+            document_id=doc_id,
+            questions=suggested_questions,
+            source_hint=page["url"],
+        )
+    except Exception as exc:
+        logger.warning(
+            "Failed to persist website question suggestions",
+            extra={"doc_id": doc_id, "error": str(exc)},
+        )
+
+    return {
+        "doc_id": doc_id,
+        "url": page["url"],
+        "domain": page["domain"],
+        "title": page["title"],
+        "chunks_indexed": stored,
+        "file_size": page["file_size"],
+        "source_type": "official_site",
         "suggested_questions": suggested_questions[:6],
     }
 
@@ -1536,10 +1648,14 @@ def _update_env_var(key: str, value: str):
 
 
 def _reload_config_module():
-    """Force-reload config.py so module-level variables pick up new os.environ values."""
+    """Force-reload config modules so module-level variables pick up new os.environ values."""
     import importlib
-    import tests.config as config
-    importlib.reload(config)
+    import config as runtime_config
+    import tests.config as test_config
+
+    # Reload runtime config first, then compatibility re-export module.
+    importlib.reload(runtime_config)
+    importlib.reload(test_config)
 
 
 # ═══════════════════════════════════════════════════════
@@ -1564,7 +1680,7 @@ def api_delete_memory(memory_id: str):
     if not CONV_ENABLED:
         raise HTTPException(status_code=400, detail="Conversation memory is disabled")
     try:
-        success = delete_memory(memory_id)
+        success = delete_memory_entry(memory_id)
         if success:
             return {"deleted": True, "id": memory_id}
         else:
@@ -1579,7 +1695,7 @@ def api_memory_cleanup():
     if not CONV_ENABLED:
         raise HTTPException(status_code=400, detail="Conversation memory is disabled")
     try:
-        deleted = cleanup_expired_memory()
+        deleted = cleanup_old_memory()
         return {"deleted": deleted, "message": f"Cleaned up {deleted} expired entries"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -1591,8 +1707,8 @@ def api_memory_clear():
     if not CONV_ENABLED:
         raise HTTPException(status_code=400, detail="Conversation memory is disabled")
     try:
-        total = clear_all_memory()
-        return {"cleared": True, "total_deleted": total}
+        success = clear_all_cache_memory()
+        return {"cleared": bool(success)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
