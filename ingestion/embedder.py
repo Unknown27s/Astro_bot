@@ -6,10 +6,11 @@ Generates embeddings using sentence-transformers and stores in ChromaDB.
 import os
 import logging
 import threading
+from typing import Any
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
-from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+from tests.config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +38,7 @@ def get_embedding_model() -> SentenceTransformer:
         return _embedding_model
 
 
-def get_chroma_client() -> chromadb.ClientAPI:
+def get_chroma_client() -> Any:
     """Get persistent ChromaDB client. Thread-safe singleton."""
     global _chroma_client
     if _chroma_client is not None:
@@ -92,16 +93,21 @@ def store_chunks(chunks: list[dict], doc_id: str) -> int:
     ids = [f"{doc_id}_chunk_{i}" for i in range(len(chunks))]
     metadatas = []
     for c in chunks:
-        meta = c.get("metadata", {})
+        meta = dict(c.get("metadata", {}))
         meta["doc_id"] = doc_id
+        meta.setdefault("source_type", "uploaded")
+
+        # ChromaDB metadata must stay primitive and cannot include null values.
+        meta = {key: value for key, value in meta.items() if value is not None}
         metadatas.append(meta)
 
     # ChromaDB add in batches (max 5461 per batch)
     batch_size = 5000
     for i in range(0, len(ids), batch_size):
+        embeddings_batch = embeddings[i : i + batch_size]
         collection.add(
             ids=ids[i : i + batch_size],
-            embeddings=embeddings[i : i + batch_size],
+            embeddings=embeddings_batch,  # type: ignore[arg-type]
             documents=texts[i : i + batch_size],
             metadatas=metadatas[i : i + batch_size],
         )

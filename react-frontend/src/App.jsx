@@ -12,6 +12,7 @@ import HealthPage from './pages/admin/HealthPage';
 import MemoryPage from './pages/admin/MemoryPage';
 import RateLimitingPage from './pages/admin/RateLimitingPage';
 import TraceMonitorPage from './pages/admin/TraceMonitorPage';
+import FaqPage from './pages/admin/FaqPage';
 
 function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
@@ -38,6 +39,7 @@ export default function App() {
           <Route path="users" element={<UsersPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="rate-limiting" element={<RateLimitingPage />} />
+          <Route path="faq" element={<FaqPage />} />
           <Route path="memory" element={<MemoryPage />} />
           <Route path="health" element={<HealthPage />} />
           <Route path="trace-monitor" element={<TraceMonitorPage />} />

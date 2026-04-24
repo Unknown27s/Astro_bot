@@ -21,8 +21,8 @@ from database.db import (
     cleanup_expired_memory, invalidate_memory_by_source,
     get_memory_stats, clear_all_memory,
 )
-from config import CONV_MATCH_THRESHOLD, CONV_ENABLED, CONV_PER_USER
-import config
+from tests.config import CONV_MATCH_THRESHOLD, CONV_ENABLED, CONV_PER_USER
+import tests.config as config
 
 
 class TestMemoryRetrieval:

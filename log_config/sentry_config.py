@@ -6,7 +6,7 @@ Initializes Sentry SDK for production error tracking and performance monitoring
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.starlette import StarletteIntegration
-from config import SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_TRACES_SAMPLE_RATE, SENTRY_ERROR_SAMPLE_RATE
+from tests.config import SENTRY_DSN, SENTRY_ENVIRONMENT, SENTRY_TRACES_SAMPLE_RATE, SENTRY_ERROR_SAMPLE_RATE
 
 
 def init_sentry():

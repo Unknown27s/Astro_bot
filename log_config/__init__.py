@@ -7,7 +7,7 @@ import logging
 import logging.handlers
 from pathlib import Path
 from pythonjsonlogger import jsonlogger
-from config import LOG_LEVEL, LOG_FILE_PATH, LOG_MAX_BYTES, LOG_BACKUP_COUNT
+from tests.config import LOG_LEVEL, LOG_FILE_PATH, LOG_MAX_BYTES, LOG_BACKUP_COUNT
 
 
 def setup_logging():

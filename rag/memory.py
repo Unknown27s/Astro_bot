@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from ingestion.embedder import generate_embeddings, get_chroma_client
-from config import (
+from tests.config import (
     CONV_ENABLED, CONV_MATCH_THRESHOLD, CONV_PERSIST_COLLECTION,
     CONV_PER_USER, CONV_TTL_DAYS, CONV_MIN_USAGE_FOR_KEEP, EMBEDDING_MODEL
 )
@@ -29,7 +29,7 @@ def get_memory_collection():
     return collection
 
 
-def query_memory(query: str, user_id: Optional[str] = None, route_mode: Optional[str] = None) -> Optional[dict]:
+def query_memory(query: str, user_id: Optional[str] = None) -> Optional[dict]:
     """
     Search for a cached response matching the query.
     
@@ -64,12 +64,6 @@ def query_memory(query: str, user_id: Optional[str] = None, route_mode: Optional
             logger.debug(f"Using global-only filter")
         else:
             logger.debug(f"No filter (global memory mode)")
-
-        if route_mode:
-            route_key = str(route_mode).strip()
-            if route_key:
-                where_filter = {**(where_filter or {}), "route_mode": route_key}
-                logger.debug(f"Using route filter: {route_key}")
 
         results = collection.query(
             query_embeddings=[query_embedding],
@@ -121,8 +115,7 @@ def add_memory_entry(
     query: str,
     response: str,
     sources: list,
-    user_id: Optional[str] = None,
-    route_mode: Optional[str] = None,
+    user_id: Optional[str] = None
 ) -> dict:
     """
     Store a new Q&A pair in memory.
@@ -155,7 +148,6 @@ def add_memory_entry(
             "response_text": response[:1000],  # Truncate for storage
             "sources_json": json.dumps(sources),
             "user_id": user_id if user_id else "global",
-            "route_mode": route_mode or "",
             "created_at": datetime.now().isoformat(),
             "last_used_at": datetime.now().isoformat(),
             "usage_count": 1,

@@ -12,6 +12,8 @@ Quick reference for all test files and what they test.
 |------|---------|-----------|--------|
 | `test_auth.py` | Authentication, JWT, login/logout | 130+ | ✅ Created |
 | `test_chat.py` | Chat endpoint, messages, rate limiting | 100+ | ✅ Created |
+| `test_faq_retriever.py` | FAQ indexing and retrieval behavior | 4+ | ✅ Created |
+| `test_query_router.py` | Query routing (general chat vs FAQ vs document) | 5+ | ✅ Created |
 | `test_rag_pipeline.py` | Document retrieval, embedding, generation | 90+ | ✅ Created |
 | `conftest.py` | Pytest fixtures and configuration | - | ✅ Created |
 

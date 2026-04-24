@@ -17,15 +17,31 @@ echo                    IMS ASTROBOT - START ALL SERVERS
 echo ══════════════════════════════════════════════════════════════════════════
 echo.
 
-REM Fix JAVA_HOME for Maven wrapper
-set "JAVA_HOME=C:\Program Files\Eclipse Adoptium\jdk-17.0.18.8-hotspot"
+REM Load JAVA_HOME from .env (project-local) or existing machine environment
+if exist ".env" (
+    for /f "usebackq tokens=1,* delims==" %%A in (".env") do (
+        if /I "%%~A"=="JAVA_HOME" set "JAVA_HOME=%%~B"
+    )
+)
+
+set "JAVA_HOME=%JAVA_HOME:\"=%"
+
+if not defined JAVA_HOME (
+    color 0C
+    echo ERROR: JAVA_HOME is not set.
+    echo Set JAVA_HOME in .env or system environment.
+    echo Example: JAVA_HOME=C:\Program Files\Java\jdk-21
+    pause
+    exit /b 1
+)
+
 set "PATH=%JAVA_HOME%\bin;%PATH%"
 
 if not exist "%JAVA_HOME%\bin\java.exe" (
     color 0C
     echo ERROR: JAVA_HOME path is invalid:
     echo        %JAVA_HOME%
-    echo Please install JDK 17 or update JAVA_HOME in this script.
+    echo Please set a valid JDK 17+ path in .env or system environment.
     pause
     exit /b 1
 )

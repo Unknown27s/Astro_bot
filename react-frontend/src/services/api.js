@@ -72,6 +72,17 @@ export const deleteDocument = (docId) => api.delete(`/documents/${docId}`);
 
 export const getKnowledgeBaseStats = () => api.get('/documents/stats');
 
+// ── FAQ ──
+export const getFaqStats = () => api.get('/faq/stats');
+
+export const addFaq = (question, answer, metadata = {}) =>
+  api.post('/faq', { question, answer, metadata });
+
+export const addFaqBulk = (entries) =>
+  api.post('/faq/bulk', { entries });
+
+export const clearFaq = () => api.post('/faq/clear');
+
 // ── Users ──
 export const listUsers = () => api.get('/users');
 

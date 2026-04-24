@@ -6,14 +6,13 @@ Handles schema creation, user management, document records, and query logs.
 import sqlite3
 import hashlib
 import uuid
-import json
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
-from config import SQLITE_DB_PATH, ADMIN_USERNAME, ADMIN_PASSWORD
+from tests.config import SQLITE_DB_PATH, ADMIN_USERNAME, ADMIN_PASSWORD
 
 
 def get_connection() -> sqlite3.Connection:
@@ -60,45 +59,8 @@ def init_db():
             uploaded_by TEXT,
             uploaded_at TEXT NOT NULL,
             status TEXT DEFAULT 'processed',
-            source_type TEXT DEFAULT 'uploaded',
-            source_domain TEXT DEFAULT '',
-            source_url TEXT DEFAULT '',
             FOREIGN KEY (uploaded_by) REFERENCES users(id)
         )
-    """)
-
-    def _ensure_column(table_name: str, column_name: str, column_ddl: str):
-        existing_columns = {
-            row[1]
-            for row in cursor.execute(f"PRAGMA table_info({table_name})").fetchall()
-        }
-        if column_name not in existing_columns:
-            cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_ddl}")
-
-    _ensure_column("documents", "source_type", "TEXT DEFAULT 'uploaded'")
-    _ensure_column("documents", "source_domain", "TEXT DEFAULT ''")
-    _ensure_column("documents", "source_url", "TEXT DEFAULT ''")
-
-    # ── Document question suggestions (generated from uploaded content) ──
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS document_question_suggestions (
-            id TEXT PRIMARY KEY,
-            document_id TEXT NOT NULL,
-            question_text TEXT NOT NULL,
-            source_hint TEXT DEFAULT '',
-            created_at TEXT NOT NULL,
-            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
-        )
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_doc_question_doc
-        ON document_question_suggestions(document_id)
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_doc_question_text
-        ON document_question_suggestions(question_text)
     """)
 
     # ── Query logs table ──
@@ -116,73 +78,52 @@ def init_db():
         )
     """)
 
-    # ── Feedback events table (chat thumbs up/down) ──
+    # ── Feedback logs table ──
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS feedback_events (
+        CREATE TABLE IF NOT EXISTS feedback_logs (
             id TEXT PRIMARY KEY,
             trace_id TEXT NOT NULL,
             user_id TEXT,
-            rating INTEGER NOT NULL CHECK(rating IN (-1, 1)),
-            comment TEXT DEFAULT '',
-            source TEXT DEFAULT 'chat_ui',
+            rating INTEGER NOT NULL,
+            comment TEXT,
+            source TEXT,
             recorded_in_langfuse INTEGER DEFAULT 0,
             created_at TEXT NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
 
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_feedback_created_at
-        ON feedback_events(created_at)
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_feedback_rating
-        ON feedback_events(rating)
-    """)
-
-    # ── Trace monitor events table (request-level observability snapshots) ──
+    # ── Trace events table ──
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS trace_events (
             id TEXT PRIMARY KEY,
-            trace_id TEXT NOT NULL,
-            endpoint TEXT NOT NULL,
+            trace_id TEXT,
+            endpoint TEXT,
             user_id TEXT,
             username TEXT,
-            status TEXT NOT NULL,
-            query_preview TEXT DEFAULT '',
+            status TEXT,
+            query_preview TEXT,
             response_time_ms REAL,
-            route_mode TEXT DEFAULT '',
-            retrieval_top_score REAL,
-            retrieval_avg_score REAL,
-            retrieval_mode TEXT DEFAULT '',
-            hyde_applied INTEGER DEFAULT 0,
+            route_mode TEXT,
+            retrieval_mode TEXT,
             chunks_count INTEGER DEFAULT 0,
-            from_memory INTEGER DEFAULT 0,
-            provider TEXT DEFAULT '',
-            model TEXT DEFAULT '',
-            fallback_chain TEXT DEFAULT '',
-            error_message TEXT DEFAULT '',
+            provider TEXT,
+            model TEXT,
             created_at TEXT NOT NULL
         )
     """)
 
+    # ── Document question suggestions table ──
     cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_trace_events_created_at
-        ON trace_events(created_at)
+        CREATE TABLE IF NOT EXISTS document_question_suggestions (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL,
+            question TEXT NOT NULL,
+            source_hint TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
+        )
     """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_trace_events_status
-        ON trace_events(status)
-    """)
-
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_trace_events_endpoint
-        ON trace_events(endpoint)
-    """)
-
-    _ensure_column("trace_events", "route_mode", "TEXT DEFAULT ''")
 
     # ── Conversation memory table (for semantic caching) ──
     cursor.execute("""
@@ -434,31 +375,16 @@ def add_document(
     file_size: int,
     chunk_count: int,
     uploaded_by: str,
-    source_type: str = "uploaded",
-    source_domain: str = "",
-    source_url: str = "",
+    source_type: str = None,
+    source_domain: str = None,
+    source_url: str = None,
 ) -> str:
     """Record a new document. Returns document ID."""
     doc_id = str(uuid.uuid4())
     conn = get_connection()
     conn.execute(
-        """INSERT INTO documents
-           (id, filename, original_name, file_type, file_size, chunk_count,
-            uploaded_by, uploaded_at, source_type, source_domain, source_url)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            doc_id,
-            filename,
-            original_name,
-            file_type,
-            file_size,
-            chunk_count,
-            uploaded_by,
-            datetime.now().isoformat(),
-            source_type,
-            source_domain,
-            source_url,
-        ),
+        "INSERT INTO documents (id, filename, original_name, file_type, file_size, chunk_count, uploaded_by, uploaded_at) VALUES (?,?,?,?,?,?,?,?)",
+        (doc_id, filename, original_name, file_type, file_size, chunk_count, uploaded_by, datetime.now().isoformat()),
     )
     conn.commit()
     conn.close()
@@ -509,277 +435,169 @@ def get_query_logs(limit: int = 100) -> list[dict]:
     return [dict(l) for l in logs]
 
 
-def log_feedback(trace_id: str, user_id: Optional[str], rating: int, comment: str = "",
-                 source: str = "chat_ui", recorded_in_langfuse: bool = False) -> str:
-    """Persist a user feedback event for analytics and quality monitoring."""
+def log_feedback(
+    trace_id: str,
+    user_id: str,
+    rating: int,
+    comment: str = "",
+    source: str = "chat_ui",
+    recorded_in_langfuse: bool = False,
+) -> str:
+    """Persist user feedback for chat responses and return the feedback ID."""
     feedback_id = str(uuid.uuid4())
     conn = get_connection()
-    conn.execute(
-        """INSERT INTO feedback_events
-           (id, trace_id, user_id, rating, comment, source, recorded_in_langfuse, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            feedback_id,
-            trace_id,
-            user_id,
-            int(rating),
-            comment or "",
-            source,
-            1 if recorded_in_langfuse else 0,
-            datetime.now().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
-    return feedback_id
+    try:
+        conn.execute(
+            """
+            INSERT INTO feedback_logs
+            (id, trace_id, user_id, rating, comment, source, recorded_in_langfuse, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                feedback_id,
+                trace_id,
+                user_id,
+                rating,
+                comment,
+                source,
+                1 if recorded_in_langfuse else 0,
+                datetime.now().isoformat(),
+            ),
+        )
+        conn.commit()
+        return feedback_id
+    finally:
+        conn.close()
 
 
 def log_trace_event(
     trace_id: str,
     endpoint: str,
-    status: str,
-    user_id: Optional[str] = None,
-    username: str = "",
+    user_id: str = None,
+    username: str = None,
+    status: str = "ok",
     query_preview: str = "",
     response_time_ms: float = 0.0,
     route_mode: str = "",
-    retrieval_top_score: Optional[float] = None,
-    retrieval_avg_score: Optional[float] = None,
     retrieval_mode: str = "",
-    hyde_applied: bool = False,
     chunks_count: int = 0,
-    from_memory: bool = False,
     provider: str = "",
     model: str = "",
-    fallback_chain: Optional[list[dict]] = None,
-    error_message: str = "",
 ) -> str:
-    """Persist one trace monitor event for timeline and health analysis."""
+    """Persist a trace event for monitoring and return its ID."""
     event_id = str(uuid.uuid4())
-    fallback_json = json.dumps(fallback_chain or [], ensure_ascii=True)
-
-    conn = get_connection()
-    conn.execute(
-        """INSERT INTO trace_events
-           (id, trace_id, endpoint, user_id, username, status, query_preview,
-            response_time_ms, route_mode, retrieval_top_score, retrieval_avg_score, retrieval_mode,
-            hyde_applied, chunks_count, from_memory, provider, model, fallback_chain,
-            error_message, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-        (
-            event_id,
-            trace_id,
-            endpoint,
-            user_id,
-            username,
-            status,
-            (query_preview or "")[:220],
-            float(response_time_ms or 0.0),
-            route_mode or "",
-            retrieval_top_score,
-            retrieval_avg_score,
-            retrieval_mode or "",
-            1 if hyde_applied else 0,
-            int(chunks_count or 0),
-            1 if from_memory else 0,
-            provider or "",
-            model or "",
-            fallback_json,
-            (error_message or "")[:400],
-            datetime.now().isoformat(),
-        ),
-    )
-    conn.commit()
-    conn.close()
-    return event_id
-
-
-def get_trace_events(
-    limit: int = 100,
-    status: Optional[str] = None,
-    endpoint: Optional[str] = None,
-    provider: Optional[str] = None,
-) -> list[dict]:
-    """Get recent trace monitor events with optional filters."""
     conn = get_connection()
     try:
-        where = []
-        params: list = []
-
-        if status:
-            where.append("status = ?")
-            params.append(status)
-        if endpoint:
-            where.append("endpoint = ?")
-            params.append(endpoint)
-        if provider:
-            where.append("provider = ?")
-            params.append(provider)
-
-        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        sql = (
-            "SELECT * FROM trace_events "
-            f"{where_sql} "
-            "ORDER BY created_at DESC "
-            "LIMIT ?"
+        conn.execute(
+            """
+            INSERT INTO trace_events
+            (id, trace_id, endpoint, user_id, username, status, query_preview,
+             response_time_ms, route_mode, retrieval_mode, chunks_count, provider, model, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                event_id,
+                trace_id,
+                endpoint,
+                user_id,
+                username,
+                status,
+                query_preview,
+                response_time_ms,
+                route_mode,
+                retrieval_mode,
+                chunks_count,
+                provider,
+                model,
+                datetime.now().isoformat(),
+            ),
         )
-        params.append(int(limit))
-
-        rows = conn.execute(sql, tuple(params)).fetchall()
-        out = []
-        for row in rows:
-            item = dict(row)
-            raw_chain = item.get("fallback_chain", "") or "[]"
-            try:
-                item["fallback_chain"] = json.loads(raw_chain)
-            except Exception:
-                item["fallback_chain"] = []
-            item["hyde_applied"] = bool(item.get("hyde_applied"))
-            item["from_memory"] = bool(item.get("from_memory"))
-            out.append(item)
-        return out
+        conn.commit()
+        return event_id
     finally:
         conn.close()
 
 
-def get_trace_event_summary(minutes: int = 60) -> dict:
-    """Get aggregate trace monitor metrics for recent window."""
+def get_trace_events(
+    limit: int = 120,
+    status: str = None,
+    endpoint: str = None,
+    provider: str = None,
+) -> list[dict]:
+    """Get recent trace events with optional filters."""
     conn = get_connection()
     try:
-        window_expr = f"-{max(int(minutes), 1)} minutes"
+        query = "SELECT * FROM trace_events WHERE 1=1"
+        params = []
+        if status:
+            query += " AND status = ?"
+            params.append(status)
+        if endpoint:
+            query += " AND endpoint = ?"
+            params.append(endpoint)
+        if provider:
+            query += " AND provider = ?"
+            params.append(provider)
+        query += " ORDER BY created_at DESC LIMIT ?"
+        params.append(limit)
+        rows = conn.execute(query, params).fetchall()
+        return [dict(row) for row in rows]
+    finally:
+        conn.close()
 
-        totals = conn.execute(
-            """SELECT
-                   COUNT(*) as total,
-                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) as failed,
-                   AVG(response_time_ms) as avg_latency
-               FROM trace_events
-               WHERE created_at >= datetime('now', ?)""",
-            (window_expr,),
-        ).fetchone()
 
+def get_trace_event_summary(window_minutes: int = 60) -> dict:
+    """Summarize recent trace events for dashboard monitoring."""
+    conn = get_connection()
+    try:
+        total = conn.execute(
+            "SELECT COUNT(*) as cnt FROM trace_events WHERE created_at >= datetime('now', ?)",
+            (f"-{int(window_minutes)} minutes",),
+        ).fetchone()["cnt"]
+        avg_response = conn.execute(
+            "SELECT AVG(response_time_ms) as avg_ms FROM trace_events WHERE created_at >= datetime('now', ?)",
+            (f"-{int(window_minutes)} minutes",),
+        ).fetchone()["avg_ms"]
+        by_status = conn.execute(
+            "SELECT status, COUNT(*) as cnt FROM trace_events WHERE created_at >= datetime('now', ?) GROUP BY status ORDER BY cnt DESC",
+            (f"-{int(window_minutes)} minutes",),
+        ).fetchall()
         by_endpoint = conn.execute(
-            """SELECT
-                   endpoint,
-                   COUNT(*) as total,
-                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) as failed,
-                   AVG(response_time_ms) as avg_latency
-               FROM trace_events
-               WHERE created_at >= datetime('now', ?)
-               GROUP BY endpoint
-               ORDER BY failed DESC, total DESC""",
-            (window_expr,),
+            "SELECT endpoint, COUNT(*) as cnt FROM trace_events WHERE created_at >= datetime('now', ?) GROUP BY endpoint ORDER BY cnt DESC LIMIT 10",
+            (f"-{int(window_minutes)} minutes",),
         ).fetchall()
-
-        by_provider = conn.execute(
-            """SELECT
-                   provider,
-                   COUNT(*) as total,
-                   SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END) as failed
-               FROM trace_events
-               WHERE created_at >= datetime('now', ?)
-               GROUP BY provider
-               ORDER BY failed DESC, total DESC""",
-            (window_expr,),
-        ).fetchall()
-
-        recent_errors = conn.execute(
-            """SELECT trace_id, endpoint, status, error_message, created_at
-               FROM trace_events
-               WHERE status != 'ok'
-               ORDER BY created_at DESC
-               LIMIT 20"""
-        ).fetchall()
-
-        total = totals["total"] or 0
-        failed = totals["failed"] or 0
-        fail_rate = (failed / total * 100.0) if total else 0.0
-
         return {
-            "window_minutes": max(int(minutes), 1),
-            "total_requests": total,
-            "failed_requests": failed,
-            "failure_rate": round(fail_rate, 2),
-            "avg_latency_ms": round(totals["avg_latency"], 1) if totals["avg_latency"] else 0.0,
-            "by_endpoint": [dict(r) for r in by_endpoint],
-            "by_provider": [dict(r) for r in by_provider],
-            "recent_errors": [dict(r) for r in recent_errors],
+            "window_minutes": int(window_minutes),
+            "total_events": total,
+            "avg_response_ms": round(avg_response, 1) if avg_response else 0,
+            "by_status": [dict(row) for row in by_status],
+            "by_endpoint": [dict(row) for row in by_endpoint],
         }
     finally:
         conn.close()
 
 
-def store_document_question_suggestions(document_id: str, questions: list[str], source_hint: str = "") -> int:
-    """Store upload-derived suggested questions for a specific document."""
-    if not questions:
-        return 0
-
+def store_document_question_suggestions(document_id: str, questions: list[str], source_hint: str = None) -> int:
+    """Persist generated question suggestions for a document and return the count stored."""
     conn = get_connection()
     try:
-        rows = []
-        seen = set()
-        for q in questions:
-            text = (q or "").strip()
-            if not text:
+        conn.execute("DELETE FROM document_question_suggestions WHERE document_id = ?", (document_id,))
+        stored = 0
+        for question in questions or []:
+            cleaned = (question or "").strip()
+            if not cleaned:
                 continue
-            key = text.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            rows.append((str(uuid.uuid4()), document_id, text, source_hint, datetime.now().isoformat()))
-
-        if not rows:
-            return 0
-
-        conn.executemany(
-            """INSERT INTO document_question_suggestions
-               (id, document_id, question_text, source_hint, created_at)
-               VALUES (?, ?, ?, ?, ?)""",
-            rows,
-        )
+            conn.execute(
+                """
+                INSERT INTO document_question_suggestions
+                (id, document_id, question, source_hint, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (str(uuid.uuid4()), document_id, cleaned, source_hint, datetime.now().isoformat()),
+            )
+            stored += 1
         conn.commit()
-        return len(rows)
-    finally:
-        conn.close()
-
-
-def get_document_question_suggestions(prefix: str = "", limit: int = 5) -> list[str]:
-    """Get recent upload-derived question suggestions, optionally filtered by prefix."""
-    conn = get_connection()
-    try:
-        if prefix and len(prefix.strip()) >= 2:
-            search_pattern = f"%{prefix.strip()}%"
-            rows = conn.execute(
-                """SELECT question_text
-                   FROM document_question_suggestions
-                   WHERE question_text LIKE ?
-                   ORDER BY created_at DESC
-                   LIMIT ?""",
-                (search_pattern, limit * 4),
-            ).fetchall()
-        else:
-            rows = conn.execute(
-                """SELECT question_text
-                   FROM document_question_suggestions
-                   ORDER BY created_at DESC
-                   LIMIT ?""",
-                (limit * 4,),
-            ).fetchall()
-
-        out = []
-        seen = set()
-        for row in rows:
-            text = (row["question_text"] or "").strip()
-            if not text:
-                continue
-            key = text.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(text)
-            if len(out) >= limit:
-                break
-        return out
+        return stored
     finally:
         conn.close()
 
@@ -818,8 +636,7 @@ def get_suggestions(query_prefix: str, user_id: str = None, limit: int = 5) -> d
     Get autocomplete suggestions from query_logs.
 
     Returns:
-        Dict with 'recent' (user's own), 'popular' (all users),
-        'document_based' (from uploaded docs), and 'preset' lists.
+        Dict with 'recent' (user's own), 'popular' (all users), and 'preset' lists.
     """
     conn = get_connection()
     try:
@@ -860,12 +677,7 @@ def get_suggestions(query_prefix: str, user_id: str = None, limit: int = 5) -> d
                     if len(popular) >= limit:
                         break
 
-        # 3) Document-derived suggestions from uploaded documents
-        document_based = get_document_question_suggestions(query_prefix, limit)
-        document_based = [q for q in document_based if q not in seen]
-        seen.update(q for q in document_based)
-
-        # 4) Preset questions (always included, filtered by prefix)
+        # 3) Preset questions (always included, filtered by prefix)
         preset = get_preset_questions(query_prefix, limit)
         # Remove presets already in recent/popular
         preset = [q for q in preset if q not in seen]
@@ -873,7 +685,6 @@ def get_suggestions(query_prefix: str, user_id: str = None, limit: int = 5) -> d
         return {
             "recent": recent[:limit],
             "popular": popular[:limit],
-            "document_based": document_based[:limit],
             "preset": preset[:limit],
         }
     finally:
@@ -906,34 +717,7 @@ def get_analytics() -> dict:
         LIMIT 5
     """).fetchall()
 
-    # Feedback totals (helpful = 1, not helpful = -1)
-    feedback_row = conn.execute("""
-        SELECT
-            COUNT(*) as total_feedback,
-            SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as helpful_feedback,
-            SUM(CASE WHEN rating = -1 THEN 1 ELSE 0 END) as not_helpful_feedback
-        FROM feedback_events
-    """).fetchone()
-
-    # Feedback per day (last 14 days)
-    daily_feedback = conn.execute("""
-        SELECT
-            DATE(created_at) as day,
-            SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as helpful,
-            SUM(CASE WHEN rating = -1 THEN 1 ELSE 0 END) as not_helpful,
-            COUNT(*) as total
-        FROM feedback_events
-        WHERE created_at >= datetime('now', '-14 days')
-        GROUP BY DATE(created_at)
-        ORDER BY day
-    """).fetchall()
-
     conn.close()
-
-    total_feedback = feedback_row["total_feedback"] or 0
-    helpful_feedback = feedback_row["helpful_feedback"] or 0
-    not_helpful_feedback = feedback_row["not_helpful_feedback"] or 0
-    helpful_rate = (helpful_feedback / total_feedback * 100.0) if total_feedback else 0.0
 
     return {
         "total_queries": total_queries,
@@ -942,11 +726,6 @@ def get_analytics() -> dict:
         "avg_response_ms": round(avg_response, 1) if avg_response else 0,
         "daily_queries": [dict(d) for d in daily_queries],
         "top_users": [dict(u) for u in top_users],
-        "total_feedback": total_feedback,
-        "helpful_feedback": helpful_feedback,
-        "not_helpful_feedback": not_helpful_feedback,
-        "helpful_feedback_rate": round(helpful_rate, 1),
-        "daily_feedback": [dict(d) for d in daily_feedback],
     }
 
 
@@ -999,7 +778,7 @@ def delete_memory(memory_id: str) -> bool:
 
 def cleanup_expired_memory() -> int:
     """Delete expired memory entries and low-usage old entries. Returns count deleted."""
-    from config import CONV_TTL_DAYS, CONV_MIN_USAGE_FOR_KEEP
+    from tests.config import CONV_TTL_DAYS, CONV_MIN_USAGE_FOR_KEEP
     
     conn = get_connection()
     try:

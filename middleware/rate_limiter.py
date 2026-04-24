@@ -8,7 +8,7 @@ from fastapi import Request
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from config import RATE_LIMIT_GLOBAL, RATE_LIMIT_PER_USER
+from tests.config import RATE_LIMIT_GLOBAL, RATE_LIMIT_PER_USER
 
 logger = logging.getLogger(__name__)
 

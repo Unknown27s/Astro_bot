@@ -255,6 +255,7 @@ export default function ChatLayout() {
         content: response.data.response,
         sources: response.data.sources || [],
         citations: response.data.citations || '',
+        routeMode: response.data.route_mode || '',
         traceId: response.data.trace_id || null,
         timestamp: new Date().toISOString(),
       };
@@ -367,6 +368,7 @@ export default function ChatLayout() {
             content: response.data.response,
             sources: response.data.sources || [],
             citations: response.data.citations || '',
+            routeMode: response.data.route_mode || '',
             traceId: response.data.trace_id || null,
             timestamp: new Date().toISOString(),
           };
@@ -596,6 +598,7 @@ export default function ChatLayout() {
                             content={msg.content}
                             sources={msg.sources}
                             citations={msg.citations}
+                            routeMode={msg.routeMode}
                             traceId={msg.traceId}
                             timestamp={msg.timestamp}
                             userId={currentUser.id}

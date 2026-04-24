@@ -200,6 +200,14 @@ class IngestUrlRequest(BaseModel):
     title: Optional[str] = None
     uploaded_by: Optional[str] = None
 
+class FAQEntryRequest(BaseModel):
+    question: str
+    answer: str
+    metadata: Optional[dict] = None
+
+class FAQBulkRequest(BaseModel):
+    entries: list[FAQEntryRequest]
+
 class CreateUserRequest(BaseModel):
     username: str
     password: str
@@ -292,7 +300,8 @@ def api_delete_announcement(announcement_id: str, request: Request):
 def api_chat(req: ChatRequest, request: Request):
     """Send a query through the RAG pipeline and get a response."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
-    from rag.generator import generate_response
+    from rag.faq_retriever import retrieve_faq_context
+    from rag.generator import generate_response, generate_response_direct
     from rag.pipeline_trace import PipelineTrace
 
     start_time = time.time()
@@ -384,30 +393,39 @@ def api_chat(req: ChatRequest, request: Request):
         trace = PipelineTrace(query=req.query, username=req.username)
         trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
-        # Step 1: Retrieve relevant chunks
-        search_query = _search_query_with_history(req.user_id, req.query)
-        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+        chunks = []
+        citations = ""
+        if route.mode == "general_chat":
+            # Bypass retrieval for non-institutional small-talk/general questions.
+            gen_result = generate_response_direct(req.query, user_id=req.user_id)
+        else:
+            # Step 1: Retrieve relevant chunks
+            search_query = _search_query_with_history(req.user_id, req.query)
+            if route.mode == "faq":
+                chunks = retrieve_faq_context(req.query)
+                if not chunks:
+                    chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+            else:
+                chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
 
-        # Step 2: Format context for LLM
-        context = format_context_for_llm(chunks)
+            # Step 2: Format context for LLM
+            context = format_context_for_llm(chunks)
 
-        # Step 3: Generate response (now includes memory handling)
-        gen_result = generate_response(
-            req.query,
-            context,
-            user_id=req.user_id,
-            sources=[c.get("source", "") for c in chunks],
-            trace=trace,
-            obs_trace=obs_trace,
-            route_mode=route.memory_scope,
-        )
+            # Step 3: Generate response (now includes memory handling)
+            gen_result = generate_response(
+                req.query,
+                context,
+                user_id=req.user_id,
+                sources=[c.get("source", "") for c in chunks],
+                trace=trace,
+                obs_trace=obs_trace,
+                route_mode=route.memory_scope,
+            )
+            citations = get_source_citations(chunks)
 
         # Extract response from dict
         response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
         from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
-
-        # Step 4: Get citations
-        citations = get_source_citations(chunks)
 
         elapsed_ms = (time.time() - start_time) * 1000
 
@@ -569,7 +587,8 @@ def api_chat_audio(
 ):
     """Receive audio, transcribe to text, and process through RAG pipeline."""
     from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
-    from rag.generator import generate_response
+    from rag.faq_retriever import retrieve_faq_context
+    from rag.generator import generate_response, generate_response_direct
     from rag.pipeline_trace import PipelineTrace
     import shutil
     from rag.voice_to_text import transcribe_audio
@@ -618,24 +637,34 @@ def api_chat_audio(
         trace = PipelineTrace(query=f"[🎤 VOICE] {transcribed_text}", username=username)
         trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
-        # Generate RAG response based on transcribed text
-        search_query = _search_query_with_history(user_id, transcribed_text)
-        chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
-        context = format_context_for_llm(chunks)
+        chunks = []
+        citations = ""
+        if route.mode == "general_chat":
+            gen_result = generate_response_direct(transcribed_text, user_id=user_id)
+        else:
+            # Generate RAG response based on transcribed text
+            search_query = _search_query_with_history(user_id, transcribed_text)
+            if route.mode == "faq":
+                chunks = retrieve_faq_context(transcribed_text)
+                if not chunks:
+                    chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+            else:
+                chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+            context = format_context_for_llm(chunks)
 
-        gen_result = generate_response(
-            transcribed_text,
-            context,
-            user_id=user_id,
-            sources=[c.get("source", "") for c in chunks],
-            trace=trace,
-            obs_trace=obs_trace,
-            route_mode=route.memory_scope,
-        )
+            gen_result = generate_response(
+                transcribed_text,
+                context,
+                user_id=user_id,
+                sources=[c.get("source", "") for c in chunks],
+                trace=trace,
+                obs_trace=obs_trace,
+                route_mode=route.memory_scope,
+            )
+            citations = get_source_citations(chunks)
 
         response_text = gen_result.get("response", "") if isinstance(gen_result, dict) else gen_result
         from_memory = gen_result.get("from_memory", False) if isinstance(gen_result, dict) else False
-        citations = get_source_citations(chunks)
         elapsed_ms = (time.time() - start_time) * 1000
 
         # Record final response stats and print trace to terminal
@@ -1057,6 +1086,81 @@ def api_ingest_document_url(req: IngestUrlRequest, request: Request):
         "file_size": page["file_size"],
         "source_type": "official_site",
         "suggested_questions": suggested_questions[:6],
+    }
+
+
+@app.post("/api/faq")
+@limiter.limit("20/minute")
+def api_add_faq(req: FAQEntryRequest, request: Request):
+    """Store a single FAQ entry for FAQ-aware retrieval."""
+    from rag.faq_retriever import store_faq_entries
+
+    question = (req.question or "").strip()
+    answer = (req.answer or "").strip()
+    if not question or not answer:
+        raise HTTPException(status_code=400, detail="Both question and answer are required")
+
+    payload = {
+        "question": question,
+        "answer": answer,
+        "metadata": req.metadata or {},
+    }
+    stored = store_faq_entries([payload], source="api_faq")
+    return {
+        "stored": stored,
+        "question": question,
+    }
+
+
+@app.post("/api/faq/bulk")
+@limiter.limit("10/minute")
+def api_add_faq_bulk(req: FAQBulkRequest, request: Request):
+    """Store multiple FAQ entries for FAQ-aware retrieval."""
+    from rag.faq_retriever import store_faq_entries
+
+    if not req.entries:
+        raise HTTPException(status_code=400, detail="entries cannot be empty")
+
+    entries = [
+        {
+            "question": (entry.question or "").strip(),
+            "answer": (entry.answer or "").strip(),
+            "metadata": entry.metadata or {},
+        }
+        for entry in req.entries
+        if (entry.question or "").strip() and (entry.answer or "").strip()
+    ]
+    if not entries:
+        raise HTTPException(status_code=400, detail="No valid FAQ entries provided")
+
+    stored = store_faq_entries(entries, source="api_faq_bulk")
+    return {
+        "stored": stored,
+        "received": len(req.entries),
+    }
+
+
+@app.get("/api/faq/stats")
+def api_faq_stats():
+    """Get FAQ index statistics."""
+    from rag.faq_retriever import get_faq_stats
+
+    stats = get_faq_stats()
+    return {
+        "total_faq_entries": stats.get("total_entries", 0),
+    }
+
+
+@app.post("/api/faq/clear")
+@limiter.limit("5/minute")
+def api_clear_faq(request: Request):
+    """Clear all FAQ entries from the FAQ index."""
+    from rag.faq_retriever import clear_faq_entries
+
+    deleted = clear_faq_entries()
+    return {
+        "deleted": deleted,
+        "message": "FAQ index cleared",
     }
 
 

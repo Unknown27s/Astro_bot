@@ -23,7 +23,7 @@ st.set_page_config(
 from auth.auth import init_session_state, login, logout, register_user
 from views.chat import render_chat_page
 from views.admin import render_admin_page, render_ai_settings_page, render_memory_page
-from config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
+from tests.config import CHROMA_PERSIST_DIR, UPLOAD_DIR, EMBEDDING_MODEL, LLM_MODE
 
 
 # ═══════════════════════════════════════════════════════
@@ -333,7 +333,7 @@ def run_admin_dashboard():
             _render_users_page()
         elif page == "🤖 AI Settings":
             render_ai_settings_page()
-        elif page == "� Memory":
+        elif page == "💾 Memory":
             render_memory_page()
         elif page == "💬 Test Chat":
             render_chat_page()

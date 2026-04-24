@@ -11,7 +11,7 @@ AstroBot uses Retrieval-Augmented Generation (RAG):
 1. Convert documents into vector embeddings during upload.
 2. Convert user query into a vector at runtime.
 3. Run vector similarity search in ChromaDB.
-4. Send top matching chunks to the LLM for grounded answer generation.
+4. Send the best page-grouped chunks to the LLM for grounded answer generation.
 
 Core runtime path:
 
@@ -46,6 +46,8 @@ Important chunk metadata stored with vectors:
 - heading/section
 - chunk index
 - doc_id
+- page_index when available
+- source_type and source_url when available
 
 This is implemented by `store_chunks()` in `ingestion/embedder.py`.
 
@@ -114,12 +116,15 @@ AstroBot now supports a hybrid retrieval mode in `rag/retriever.py`:
 1. Dense retrieval from ChromaDB cosine similarity.
 2. BM25 keyword retrieval over indexed chunk text.
 3. Weighted fusion + reranking.
+4. Page-aware grouping so broad queries like "what courses are available" rank the best page or document block instead of a single isolated chunk.
 
 Fusion score:
 
 - `final_score = HYBRID_DENSE_WEIGHT * dense_score + (1 - HYBRID_DENSE_WEIGHT) * bm25_score`
 
 This helps when user questions are indirect, short, or keyword-heavy.
+
+For list-style questions, the retriever applies a small intent boost to BM25 and page-level grouping so availability queries favor page summaries, course lists, and section headings.
 
 ### HyDE Fallback (Low-Confidence Retrieval)
 
@@ -142,6 +147,17 @@ This improves recall for indirect or ambiguous queries where direct user wording
 2. Context is passed to `generate_response(...)`.
 3. LLM generates the final answer grounded in retrieved context.
 4. Citations are built from chunk metadata and returned to client.
+
+### Generator behavior
+
+The LLM generator in `rag/generator.py` does not rewrite retrieval logic. It receives the formatted context plus the user question and should answer from the provided page-grouped context.
+
+Recommended prompt behavior:
+
+- prefer concise answers for list-style queries
+- preserve citations and page references when present
+- avoid inventing course names or availability details that are not present in context
+- use the retrieved context as the source of truth
 
 ---
 
@@ -186,7 +202,7 @@ From `config.py`:
 - `CHROMA_PERSIST_DIR` (vector store path)
 - `CHUNK_SIZE` (default: 500)
 - `CHUNK_OVERLAP` (default: 50)
-- `RETRIEVAL_MODE` (`dense` or `hybrid`)
+- `RETRIEVAL_MODE` (`dense` or `hybrid`, default `hybrid` in this repo)
 - `HYBRID_DENSE_WEIGHT` (default: 0.7)
 - `HYBRID_DENSE_CANDIDATES` (default: 20)
 - `HYBRID_BM25_CANDIDATES` (default: 40)

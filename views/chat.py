@@ -7,9 +7,8 @@ import time
 import streamlit as st
 from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
 from rag.generator import generate_response, is_llm_available
-from rag.pipeline_trace import PipelineTrace
 from database.db import log_query
-from config import CONV_ENABLED
+from tests.config import CONV_ENABLED
 
 
 def render_chat_page():
@@ -66,17 +65,9 @@ def render_chat_page():
         with st.chat_message("assistant", avatar="🤖"):
             with st.spinner("Searching documents and generating response..."):
                 start_time = time.time()
-                trace = PipelineTrace(query=prompt, username=st.session_state.username)
 
                 # Step 1: Retrieve relevant chunks
-                from rag.conversation_history import get_history
-                history = get_history(st.session_state.user_id)
-                search_query = prompt
-                if history:
-                    previous_queries = " ".join([q for q, r in history])
-                    search_query = f"{previous_queries} {prompt}"
-                
-                chunks = retrieve_context(search_query, trace=trace)
+                chunks = retrieve_context(prompt)
 
                 # Step 2: Format context for LLM
                 context = format_context_for_llm(chunks)
@@ -86,8 +77,7 @@ def render_chat_page():
                     prompt, 
                     context,
                     user_id=st.session_state.user_id,
-                    sources=[c.get("source", "") for c in chunks],
-                    trace=trace,
+                    sources=[c.get("source", "") for c in chunks]
                 )
                 
                 # Extract response from dict (handles both old string format and new dict format)
@@ -102,13 +92,6 @@ def render_chat_page():
                 citations = get_source_citations(chunks)
 
                 elapsed_ms = (time.time() - start_time) * 1000
-                unique_sources = len(set(c.get("source", "") for c in chunks))
-                trace.record_response(
-                    response_length=len(response) if response else 0,
-                    unique_sources=unique_sources,
-                    from_memory=from_memory,
-                )
-                trace.print_summary()
 
             # Display memory cache indicator if from memory
             if from_memory and CONV_ENABLED:

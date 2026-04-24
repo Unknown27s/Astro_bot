@@ -6,7 +6,16 @@ import chatbotLogo from '../../assets/astrobot-logo.svg';
 
 const CHATBOT_LOGO_URL = '/astrobot-logo.png';
 
-export default function BotMessage({ content, sources = [], citations = '', timestamp, traceId = null, onFeedback = null }) {
+const ROUTE_LABELS = {
+  general_chat: 'General Chat',
+  faq: 'FAQ',
+  document: 'Document',
+  official_site: 'Official Site',
+  hybrid: 'Hybrid',
+  unclear: 'Auto',
+};
+
+export default function BotMessage({ content, sources = [], citations = '', timestamp, traceId = null, routeMode = '', onFeedback = null }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
@@ -42,6 +51,11 @@ export default function BotMessage({ content, sources = [], citations = '', time
       <div className="flex-1 space-y-3">
         <div className="flex items-center gap-2">
           <span className="font-astro-headline text-sm font-bold tracking-wide text-cyan-100">ASTROBOT</span>
+          {routeMode && (
+            <span className="rounded-full border border-cyan-200/35 bg-cyan-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-cyan-100">
+              {ROUTE_LABELS[routeMode] || routeMode}
+            </span>
+          )}
           {timestamp && (
             <span className="text-xs text-slate-200/90">
               {new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}

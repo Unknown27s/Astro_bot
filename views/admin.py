@@ -5,11 +5,12 @@ Document management + AI Settings page.
 
 import os
 import time
+import json
 import logging
 import streamlit as st
 from pathlib import Path
 
-from config import (
+from tests.config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS,
     MODEL_MAX_TOKENS, MODEL_TEMPERATURE,
     EMBEDDING_MODEL, SYSTEM_PROMPT, BASE_DIR,
@@ -25,20 +26,85 @@ logger = logging.getLogger(__name__)
 from database.db import (
     get_all_documents, delete_document, add_document,
     get_memory_stats, cleanup_expired_memory, clear_all_memory, delete_memory,
-    store_document_question_suggestions,
 )
 from ingestion.parser import parse_document
 from ingestion.chunker import chunk_document
 from ingestion.embedder import store_chunks, delete_doc_chunks, get_collection_stats
-from ingestion.question_suggester import generate_document_questions
+from rag.faq_retriever import store_faq_entries, get_faq_collection, clear_faq_entries
 
 
 def render_admin_page():
     """Render document management (called from app.py admin sidebar → Documents)."""
 
-    st.markdown("### 📄 Document Management")
+    st.markdown("### 📄 Knowledge Management")
     st.divider()
-    _render_document_management()
+    tab_docs, tab_faq = st.tabs(["📄 Documents", "❓ FAQs"])
+    with tab_docs:
+        _render_document_management()
+    with tab_faq:
+        _render_faq_management()
+
+
+def _render_faq_management():
+    """FAQ creation and index management section."""
+    st.subheader("FAQ Index")
+    st.caption("Add structured question-answer pairs for FAQ-aware retrieval.")
+
+    collection = get_faq_collection()
+    st.metric("Total FAQ Entries", collection.count())
+
+    with st.form("faq_single_entry_form"):
+        question = st.text_input("Question", placeholder="e.g., What is the admission process?")
+        answer = st.text_area("Answer", placeholder="Add clear institutional answer here...", height=120)
+        category = st.text_input("Category (optional)", placeholder="admission")
+        source = st.text_input("Source (optional)", placeholder="Admission Handbook")
+        submitted = st.form_submit_button("➕ Add FAQ", use_container_width=True, type="primary")
+        if submitted:
+            payload = {
+                "question": (question or "").strip(),
+                "answer": (answer or "").strip(),
+                "metadata": {
+                    "category": (category or "").strip() or None,
+                    "source": (source or "").strip() or None,
+                },
+            }
+            stored = store_faq_entries([payload], source="admin_ui")
+            if stored:
+                st.success("✅ FAQ entry added")
+                st.rerun()
+            else:
+                st.error("❌ Failed to add FAQ entry. Ensure question and answer are not empty.")
+
+    st.divider()
+    st.subheader("Bulk FAQ Import")
+    st.caption("Paste JSON array with entries: [{\"question\":\"...\",\"answer\":\"...\",\"metadata\":{...}}]")
+    bulk_json = st.text_area(
+        "FAQ JSON",
+        height=180,
+        placeholder='[{"question":"What is the admission process?","answer":"Apply online...","metadata":{"category":"admission"}}]',
+    )
+    if st.button("📥 Import FAQs", use_container_width=True):
+        try:
+            parsed = json.loads(bulk_json)
+            if not isinstance(parsed, list):
+                st.error("❌ JSON must be a list of FAQ objects")
+            else:
+                stored = store_faq_entries(parsed, source="admin_bulk")
+                st.success(f"✅ Imported {stored} FAQ entries")
+                st.rerun()
+        except json.JSONDecodeError as exc:
+            st.error(f"❌ Invalid JSON: {exc}")
+
+    st.divider()
+    if st.button("🗑️ Clear FAQ Index", type="secondary", use_container_width=True):
+        if st.session_state.get("confirm_clear_faq", False):
+            deleted = clear_faq_entries()
+            st.success(f"✅ Cleared FAQ index ({deleted} entries removed)")
+            st.session_state["confirm_clear_faq"] = False
+            st.rerun()
+        else:
+            st.warning("Click again to confirm clearing all FAQ entries")
+            st.session_state["confirm_clear_faq"] = True
 
 
 def _render_document_management():
@@ -103,8 +169,6 @@ def _render_document_management():
                             pass
                         error_count += 1
                         continue
-                except HTTPException:
-                    raise  # Re-raise our validation error
                 except Exception as e:
                     logger.debug(f"PDF encryption check error for {uploaded_file.name}: {e}")
                     # Don't block on encryption check errors, let parsing handle it
@@ -136,13 +200,6 @@ def _render_document_management():
                 error_count += 1
                 continue
 
-            suggested_questions = generate_document_questions(
-                uploaded_file.name,
-                text,
-                chunks,
-                limit=10,
-            )
-
             # Record in database
             try:
                 doc_id = add_document(
@@ -167,16 +224,7 @@ def _render_document_management():
             # Store embeddings in ChromaDB
             try:
                 stored = store_chunks(chunks, doc_id)
-                store_document_question_suggestions(
-                    document_id=doc_id,
-                    questions=suggested_questions,
-                    source_hint=uploaded_file.name,
-                )
                 st.success(f"✅ {uploaded_file.name} — {stored} chunks indexed")
-                if suggested_questions:
-                    with st.expander(f"Suggested questions from {uploaded_file.name}", expanded=False):
-                        for question in suggested_questions[:6]:
-                            st.markdown(f"- {question}")
                 success_count += 1
             except Exception as e:
                 st.error(f"❌ Failed to index {uploaded_file.name} in vector database: {str(e)}")
@@ -616,7 +664,7 @@ def render_memory_page():
         st.subheader("Memory Configuration")
         
         try:
-            import config
+            import tests.config as config
             
             st.info(
                 f"""

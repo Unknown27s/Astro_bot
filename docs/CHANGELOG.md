@@ -4,6 +4,36 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.8] - 2026-04-24
+
+### 🐛 Bug Fixes
+
+#### FastAPI Startup Import Recovery (Database Helpers)
+- Restored missing database helpers referenced by `api_server.py` import list.
+- Added persistence paths used by runtime endpoints for:
+  - Feedback logging
+  - Trace monitor event logging and summary
+  - Upload-derived document question suggestions
+- Updated file:
+  - `database/db.py`
+
+#### Chat Runtime Compatibility for Observability Args
+- Fixed `TypeError: generate_response() got an unexpected keyword argument 'trace'` during `/api/chat` and voice chat flows.
+- Updated generator function signatures to accept observability compatibility arguments (`trace`, `obs_trace`, `route_mode`) without breaking existing return behavior.
+- Updated file:
+  - `rag/generator.py`
+
+#### Cross-Machine Java Setup for Startup Script
+- Updated Windows launcher to read `JAVA_HOME` from project `.env` (or existing system environment) instead of a hardcoded machine-specific JDK path.
+- Added `.env.example` key for `JAVA_HOME` so each developer can configure local Java installation path safely.
+- Updated files:
+  - `start-all-servers.bat`
+  - `.env.example`
+
+### ✅ Compatibility
+- No API endpoint path changes.
+- No request/response schema changes.
+
 ## [2.3.7] - 2026-04-14
 
 ### 🐛 Bug Fixes

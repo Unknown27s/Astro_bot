@@ -13,7 +13,7 @@ Users ask questions about institutional documents, and the system retrieves rele
 Current focus areas:
 - document upload and parsing
 - chunking and embeddings into ChromaDB
-- hybrid retrieval with dense search, BM25, and HyDE fallback
+- hybrid retrieval with dense search, BM25, page-aware grouping, and HyDE fallback
 - feedback capture and trace monitoring
 - voice input through Whisper
 - role-based access for admin, faculty, and student users
@@ -68,8 +68,8 @@ The repo still includes a Streamlit interface, but the current development focus
 
 1. User asks a question.
 2. The question is embedded.
-3. Retrieval combines dense similarity, BM25, and HyDE fallback when needed.
-4. The generator builds the answer from retrieved context.
+3. Retrieval combines dense similarity, BM25, page-aware ranking, and HyDE fallback when needed.
+4. The generator builds the answer from retrieved page-grouped context.
 5. The response includes citations and is logged for analytics and tracing.
 
 ---
@@ -162,6 +162,7 @@ springboot-backend/ - proxy and integration layer
 - ✅ Where is the configuration stored?
 - ✅ What happens when a user asks a question?
 - ✅ How does the fallback chain work?
+- ✅ How does page-aware grouping improve broad questions?
 - ✅ What are the three database tables?
 - ✅ How does ChromaDB search work?
 - ✅ What should you NOT do when coding?

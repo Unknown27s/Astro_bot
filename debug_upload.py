@@ -29,7 +29,7 @@ except ImportError as e:
 
 # Test 2: Check upload directory
 print("\n[2/6] Checking upload directory...")
-from config import UPLOAD_DIR, CHROMA_PERSIST_DIR
+from tests.config import UPLOAD_DIR, CHROMA_PERSIST_DIR
 
 if UPLOAD_DIR.exists():
     files = list(UPLOAD_DIR.glob("*"))

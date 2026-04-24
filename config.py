@@ -57,7 +57,7 @@ ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
 
 # ── Retrieval ──
 TOP_K_RESULTS = 5
-RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "dense")  # dense | hybrid
+RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")  # dense | hybrid
 HYBRID_DENSE_WEIGHT = float(os.getenv("HYBRID_DENSE_WEIGHT", "0.7"))
 HYBRID_BM25_CANDIDATES = int(os.getenv("HYBRID_BM25_CANDIDATES", "40"))
 HYBRID_DENSE_CANDIDATES = int(os.getenv("HYBRID_DENSE_CANDIDATES", "20"))
@@ -67,6 +67,10 @@ HYDE_SCORE_BLEND = float(os.getenv("HYDE_SCORE_BLEND", "0.6"))
 HYDE_MAX_TOKENS = int(os.getenv("HYDE_MAX_TOKENS", "180"))
 HYDE_MAX_CHARS = int(os.getenv("HYDE_MAX_CHARS", "1400"))
 HYDE_TEMPERATURE = float(os.getenv("HYDE_TEMPERATURE", "0.2"))
+ENABLE_GENERAL_CHAT_ROUTING = os.getenv("ENABLE_GENERAL_CHAT_ROUTING", "true").lower() == "true"
+FAQ_COLLECTION = os.getenv("FAQ_COLLECTION", "ims_faq")
+FAQ_TOP_K = int(os.getenv("FAQ_TOP_K", "5"))
+FAQ_MIN_SCORE = float(os.getenv("FAQ_MIN_SCORE", "0.45"))
 
 # ── Official Site Ingestion ──
 OFFICIAL_SITE_ALLOWED_DOMAINS = [

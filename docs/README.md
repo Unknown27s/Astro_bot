@@ -13,6 +13,17 @@ The active system is centered on:
 
 ---
 
+## Latest Stability Fixes (2026-04-24)
+
+- Fixed startup import failures in FastAPI by restoring missing database helper functions used by API endpoints.
+- Added persistence support for feedback logs, trace monitor events, and upload-derived suggested questions in SQLite.
+- Fixed chat generation runtime crash caused by observability keyword arguments (`trace`, `obs_trace`, `route_mode`) not being accepted by generator functions.
+- Updated files:
+    - `database/db.py`
+    - `rag/generator.py`
+
+---
+
 ## 📖 Documentation Index
 
 ### Current docs

@@ -293,6 +293,46 @@ public class PythonApiService {
                 .block();
     }
 
+    // ── FAQ ──
+
+    public Map<String, Object> addFaq(Map<String, Object> payload) {
+        return client.post()
+                .uri("/api/faq")
+                .bodyValue(payload)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> addFaqBulk(List<Map<String, Object>> entries) {
+        return client.post()
+                .uri("/api/faq/bulk")
+                .bodyValue(Map.of("entries", entries))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> getFaqStats() {
+        return client.get()
+                .uri("/api/faq/stats")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> clearFaq() {
+        return client.post()
+                .uri("/api/faq/clear")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
     // ── Rate Limiting (Admin) ──
 
     public Map<String, Object> getRateLimits() {

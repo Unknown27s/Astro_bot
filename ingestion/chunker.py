@@ -4,8 +4,7 @@ Combines structural (heading-aware) splitting with fixed-size overlap chunking.
 """
 
 import re
-from typing import Optional
-from config import CHUNK_SIZE, CHUNK_OVERLAP
+from tests.config import CHUNK_SIZE, CHUNK_OVERLAP
 
 
 def _split_by_headings(text: str) -> list[dict]:
@@ -27,13 +26,13 @@ def _split_by_headings(text: str) -> list[dict]:
 
     if not matches:
         # No structure found — treat as single block
-        return [{"heading": "", "content": text}]
+        return [{"heading": "", "content": text, "page_index": None, "section_type": "plain"}]
 
     # Content before first heading
     if matches[0].start() > 0:
         pre_content = text[:matches[0].start()].strip()
         if pre_content:
-            sections.append({"heading": "", "content": pre_content})
+            sections.append({"heading": "", "content": pre_content, "page_index": None, "section_type": "plain"})
 
     # Split by headings
     for i, match in enumerate(matches):
@@ -42,9 +41,35 @@ def _split_by_headings(text: str) -> list[dict]:
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         content = text[start:end].strip()
         if content:
-            sections.append({"heading": heading, "content": content})
+            clean_heading, page_index, section_type = _normalize_heading_metadata(heading)
+            sections.append(
+                {
+                    "heading": clean_heading,
+                    "content": content,
+                    "page_index": page_index,
+                    "section_type": section_type,
+                }
+            )
 
     return sections
+
+
+def _normalize_heading_metadata(heading: str) -> tuple[str, int | None, str]:
+    """Normalize a structural heading and extract page-aware metadata when present."""
+    cleaned = (heading or "").lstrip("#").strip()
+    if not cleaned:
+        return "", None, "plain"
+
+    page_match = re.match(r"^\[(Page|Slide)\s+(\d+)\]$", cleaned, flags=re.IGNORECASE)
+    if page_match:
+        section_kind = page_match.group(1).lower()
+        page_index = int(page_match.group(2))
+        return f"{section_kind.title()} {page_index}", page_index, section_kind
+
+    if cleaned.lower().startswith("sheet:"):
+        return cleaned, None, "sheet"
+
+    return cleaned, None, "heading"
 
 
 def _fixed_size_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
@@ -90,16 +115,15 @@ def chunk_document(
     chunk_size: int = CHUNK_SIZE,
     overlap: int = CHUNK_OVERLAP,
     source_type: str = "uploaded",
-    source_url: str = "",
-    source_domain: str = "",
-    page_title: str = "",
-    extra_metadata: Optional[dict] = None,
+    source_url: str | None = None,
+    source_domain: str | None = None,
+    page_title: str | None = None,
 ) -> list[dict]:
     """
     Hybrid chunking: first split by structure (headings), then apply fixed-size chunking.
     
     Returns list of dicts:
-        {"text": str, "metadata": {"source": str, "heading": str, "chunk_index": int}}
+        {"text": str, "metadata": {"source": str, "heading": str, "chunk_index": int, ...}}
     """
     if not text or not text.strip():
         return []
@@ -111,6 +135,8 @@ def chunk_document(
     for section in sections:
         heading = section["heading"]
         content = section["content"]
+        page_index = section.get("page_index")
+        section_type = section.get("section_type", "heading")
 
         # Prepend heading to content for context
         if heading:
@@ -121,18 +147,25 @@ def chunk_document(
         sub_chunks = _fixed_size_chunks(content_with_heading, chunk_size, overlap)
 
         for sub_chunk in sub_chunks:
+            metadata = {
+                "source": source_name,
+                "heading": heading,
+                "chunk_index": chunk_index,
+                "source_type": source_type or "uploaded",
+                "section_type": section_type,
+            }
+            if page_index is not None:
+                metadata["page_index"] = page_index
+            if source_url:
+                metadata["source_url"] = source_url
+            if source_domain:
+                metadata["source_domain"] = source_domain
+            if page_title:
+                metadata["page_title"] = page_title
+
             all_chunks.append({
                 "text": sub_chunk,
-                "metadata": {
-                    "source": source_name,
-                    "heading": heading.lstrip("#").strip() if heading else "",
-                    "chunk_index": chunk_index,
-                    "source_type": source_type,
-                    "source_url": source_url,
-                    "source_domain": source_domain,
-                    "page_title": page_title,
-                    **(extra_metadata or {}),
-                },
+                "metadata": metadata,
             })
             chunk_index += 1
 
