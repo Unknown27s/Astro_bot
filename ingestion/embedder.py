@@ -65,6 +65,16 @@ def get_collection():
     return collection
 
 
+def _invalidate_retrieval_cache() -> None:
+    """Clear retriever-side caches after the collection changes."""
+    try:
+        from rag.retriever import invalidate_bm25_index
+
+        invalidate_bm25_index()
+    except Exception as exc:  # pragma: no cover - best effort only
+        logger.debug("Unable to invalidate BM25 cache: %s", exc)
+
+
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
     """Generate embeddings for a list of texts."""
     model = get_embedding_model()
@@ -112,6 +122,7 @@ def store_chunks(chunks: list[dict], doc_id: str) -> int:
             metadatas=metadatas[i : i + batch_size],
         )
 
+    _invalidate_retrieval_cache()
     return len(chunks)
 
 
@@ -124,6 +135,7 @@ def delete_doc_chunks(doc_id: str):
         if results and results["ids"]:
             collection.delete(ids=results["ids"])
             logger.debug(f"Deleted {len(results['ids'])} chunks for document: {doc_id}")
+            _invalidate_retrieval_cache()
     except Exception as e:
         logger.error(f"Error deleting chunks for doc {doc_id}: {e}", exc_info=True)
 

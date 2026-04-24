@@ -14,6 +14,7 @@ This index points to the current AstroBot documentation first and keeps older ph
 | [architecture/QUERY_TO_VECTOR_SEARCH.md](architecture/QUERY_TO_VECTOR_SEARCH.md) | Dense, BM25, and HyDE retrieval | 15 min |
 | [development/LANGFUSE_INTEGRATION_GUIDE.md](development/LANGFUSE_INTEGRATION_GUIDE.md) | Tracing, feedback, and trace monitor | 10 min |
 | [UPLOAD_API_REFERENCE.md](UPLOAD_API_REFERENCE.md) | Upload response and suggested questions | 10 min |
+| [proposal_feature/official_site_ingestion_plan.md](proposal_feature/official_site_ingestion_plan.md) | Site crawl ingest flow and UI behavior | 10 min |
 | [Voice_to_Text_Implementation_Guide.md](Voice_to_Text_Implementation_Guide.md) | Whisper voice input | 10 min |
 
 ---

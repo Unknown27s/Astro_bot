@@ -29,6 +29,27 @@ def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
 
+def _ensure_column_exists(conn: sqlite3.Connection, table_name: str, column_name: str, column_definition: str) -> None:
+    """Add a missing column to an existing table when older databases are loaded."""
+    columns = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    existing = {column[1] for column in columns}
+    if column_name not in existing:
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_definition}")
+
+
+def _resolve_question_suggestion_column(conn: sqlite3.Connection) -> str:
+    """Return the question column name used by the live SQLite schema."""
+    columns = conn.execute("PRAGMA table_info(document_question_suggestions)").fetchall()
+    existing = {column[1] for column in columns}
+    if "question" in existing:
+        return "question"
+    if "question_text" in existing:
+        return "question_text"
+
+    _ensure_column_exists(conn, "document_question_suggestions", "question", "question TEXT")
+    return "question"
+
+
 def init_db():
     """Initialize all database tables and default admin user."""
     conn = get_connection()
@@ -124,6 +145,7 @@ def init_db():
             FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
         )
     """)
+    _ensure_column_exists(conn, "document_question_suggestions", "question", "question TEXT")
 
     # ── Conversation memory table (for semantic caching) ──
     cursor.execute("""
@@ -581,6 +603,7 @@ def store_document_question_suggestions(document_id: str, questions: list[str], 
     """Persist generated question suggestions for a document and return the count stored."""
     conn = get_connection()
     try:
+        question_column = _resolve_question_suggestion_column(conn)
         conn.execute("DELETE FROM document_question_suggestions WHERE document_id = ?", (document_id,))
         stored = 0
         for question in questions or []:
@@ -590,9 +613,9 @@ def store_document_question_suggestions(document_id: str, questions: list[str], 
             conn.execute(
                 """
                 INSERT INTO document_question_suggestions
-                (id, document_id, question, source_hint, created_at)
+                (id, document_id, {question_column}, source_hint, created_at)
                 VALUES (?, ?, ?, ?, ?)
-                """,
+                """.format(question_column=question_column),
                 (str(uuid.uuid4()), document_id, cleaned, source_hint, datetime.now().isoformat()),
             )
             stored += 1

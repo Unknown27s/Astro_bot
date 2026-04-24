@@ -8,8 +8,10 @@ Spring Boot (or any HTTP client) to consume the RAG pipeline.
 import os
 import sys
 import time
+import re
 import uuid
 from pathlib import Path
+from urllib.parse import urlparse
 from typing import Optional
 
 # Ensure project root is in path
@@ -60,7 +62,7 @@ from database.db import (
 from rag.memory import delete_memory_entry, cleanup_old_memory, clear_all_memory as clear_all_cache_memory
 from tests.config import (
     UPLOAD_DIR, SUPPORTED_EXTENSIONS, EMBEDDING_MODEL,
-    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED,
+    CHROMA_PERSIST_DIR, LLM_MODE, BASE_DIR, CONV_ENABLED, ADMIN_USERNAME,
 )
 
 init_db()
@@ -199,6 +201,10 @@ class IngestUrlRequest(BaseModel):
     url: str
     title: Optional[str] = None
     uploaded_by: Optional[str] = None
+    crawl_site: bool = False
+    max_pages: int = 25
+    max_depth: int = 2
+    delay_seconds: float = 0.5
 
 class FAQEntryRequest(BaseModel):
     question: str
@@ -234,6 +240,105 @@ class ProviderSettingsRequest(BaseModel):
     temperature: Optional[float] = None
     max_tokens: Optional[int] = None
     system_prompt: Optional[str] = None
+
+
+def _safe_site_filename(domain: str, page_url: str, title: str | None = None, index: int | None = None) -> str:
+    """Build a stable, filesystem-safe filename for crawled pages."""
+    parsed = urlparse(page_url)
+    path_bits = (parsed.path.strip("/") or "home").split("/")
+    path_slug = "_".join(path_bits)
+    if title:
+        title_slug = re.sub(r"[^a-zA-Z0-9]+", "_", title).strip("_")
+        if title_slug:
+            path_slug = title_slug
+    path_slug = re.sub(r"[^a-zA-Z0-9]+", "_", path_slug).strip("_") or "page"
+    suffix = f"_{index}" if index is not None else ""
+    return f"web_{domain}_{path_slug[:60]}{suffix}.html"
+
+
+def _resolve_document_owner_id(uploaded_by: str | None) -> str:
+    """Resolve a valid user id for document ownership."""
+    if uploaded_by:
+        return uploaded_by
+
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id FROM users WHERE username = ? AND is_active = 1",
+            (ADMIN_USERNAME,),
+        ).fetchone()
+        if row:
+            return row["id"]
+
+        row = conn.execute(
+            "SELECT id FROM users WHERE role = 'admin' AND is_active = 1 ORDER BY created_at ASC LIMIT 1",
+        ).fetchone()
+        if row:
+            return row["id"]
+    finally:
+        conn.close()
+
+    raise HTTPException(
+        status_code=422,
+        detail="No active admin account is available to own crawled documents",
+    )
+
+
+def _ingest_official_site_page(page: dict, uploaded_by: str | None, source_hint: str | None = None, index: int | None = None) -> dict:
+    """Store one official-site page in SQLite, ChromaDB, and suggestion cache."""
+    from ingestion.chunker import chunk_document
+    from ingestion.embedder import store_chunks
+    from ingestion.question_suggester import generate_document_questions
+
+    page_url = page["url"]
+    page_domain = page.get("domain") or (urlparse(page_url).hostname or "site").lower().removeprefix("www.")
+    page_title = page.get("title") or source_hint or page_url
+    page_text = page.get("text", "")
+    page_file_size = int(page.get("file_size") or len(page_text.encode("utf-8")))
+    owner_id = _resolve_document_owner_id(uploaded_by)
+
+    chunks = chunk_document(
+        page_text,
+        source_name=page_title,
+        source_type="official_site",
+        source_url=page_url,
+        source_domain=page_domain,
+        page_title=page_title,
+    )
+    if not chunks:
+        raise HTTPException(status_code=422, detail=f"No chunks generated from website page: {page_title}")
+
+    suggested_questions = generate_document_questions(page_title, page_text, chunks, limit=10)
+
+    doc_id = add_document(
+        filename=_safe_site_filename(page_domain, page_url, page_title, index=index),
+        original_name=page_title,
+        file_type="web",
+        file_size=page_file_size,
+        chunk_count=len(chunks),
+        uploaded_by=owner_id,
+        source_type="official_site",
+        source_domain=page_domain,
+        source_url=page_url,
+    )
+
+    stored = store_chunks(chunks, doc_id)
+    stored_q = store_document_question_suggestions(
+        document_id=doc_id,
+        questions=suggested_questions,
+        source_hint=source_hint or page_url,
+    )
+
+    return {
+        "doc_id": doc_id,
+        "url": page_url,
+        "domain": page_domain,
+        "title": page_title,
+        "chunks_indexed": stored,
+        "suggested_questions": suggested_questions,
+        "questions_indexed": stored_q,
+        "file_size": page_file_size,
+    }
 
 
 # ═══════════════════════════════════════════════════════
@@ -1008,11 +1113,8 @@ def api_upload_document(
 @app.post("/api/documents/ingest-url")
 @limiter.limit("10/minute")
 def api_ingest_document_url(req: IngestUrlRequest, request: Request):
-    """Fetch an official-site page, convert it into chunks, and index it locally."""
-    from ingestion.web_ingest import fetch_official_site_page
-    from ingestion.chunker import chunk_document
-    from ingestion.embedder import store_chunks
-    from ingestion.question_suggester import generate_document_questions
+    """Fetch one official-site page or crawl a whole site and index it locally."""
+    from ingestion.web_ingest import fetch_official_site_page, crawl_site_for_ingestion, CrawlConfig
 
     if req.uploaded_by:
         conn = get_connection()
@@ -1025,67 +1127,75 @@ def api_ingest_document_url(req: IngestUrlRequest, request: Request):
         if user["role"] != "admin":
             raise HTTPException(status_code=403, detail="Only administrators can ingest official-site pages")
 
+    if req.crawl_site:
+        pages = crawl_site_for_ingestion(
+            req.url,
+            CrawlConfig(
+                max_pages=max(1, min(int(req.max_pages), 500)),
+                max_depth=max(0, min(int(req.max_depth), 10)),
+                delay_seconds=max(0.0, float(req.delay_seconds)),
+            ),
+        )
+        if not pages:
+            raise HTTPException(status_code=422, detail="No pages could be crawled from the provided website")
+
+        indexed_pages = []
+        total_chunks = 0
+        for index, page in enumerate(pages, start=1):
+            if not page.get("text", "").strip():
+                continue
+            try:
+                result = _ingest_official_site_page(
+                    page,
+                    req.uploaded_by,
+                    source_hint=req.title or page.get("title"),
+                    index=index,
+                )
+                indexed_pages.append({
+                    "doc_id": result["doc_id"],
+                    "url": result["url"],
+                    "title": result["title"],
+                    "chunks_indexed": result["chunks_indexed"],
+                    "questions_indexed": result["questions_indexed"],
+                })
+                total_chunks += result["chunks_indexed"]
+            except HTTPException:
+                raise
+            except Exception as exc:
+                logger.warning("Failed to ingest crawled page", extra={"url": page.get("url"), "error": str(exc)}, exc_info=True)
+
+        if not indexed_pages:
+            raise HTTPException(status_code=422, detail="Crawl completed but no pages were indexed")
+
+        return {
+            "mode": "crawl",
+            "seed_url": req.url,
+            "pages_indexed": len(indexed_pages),
+            "chunks_indexed": total_chunks,
+            "indexed_pages": indexed_pages[:20],
+            "source_type": "official_site",
+        }
+
     page = fetch_official_site_page(req.url)
     if not page.get("ok"):
         raise HTTPException(status_code=422, detail=page.get("error", "Failed to ingest website page"))
 
-    text = page["text"]
-    chunks = chunk_document(
-        text,
-        source_name=req.title or page["title"],
-        source_type="official_site",
-        source_url=page["url"],
-        source_domain=page["domain"],
-        page_title=page["title"],
+    result = _ingest_official_site_page(
+        page,
+        req.uploaded_by,
+        source_hint=req.title or page.get("title"),
     )
-    if not chunks:
-        raise HTTPException(status_code=422, detail="No chunks generated from website page")
-
-    suggested_questions = generate_document_questions(req.title or page["title"], text, chunks, limit=10)
-
-    try:
-        doc_id = add_document(
-            filename=f"web_{page['domain']}_{int(time.time())}.html",
-            original_name=req.title or page["title"],
-            file_type="web",
-            file_size=page["file_size"],
-            chunk_count=len(chunks),
-            uploaded_by=req.uploaded_by,
-            source_type="official_site",
-            source_domain=page["domain"],
-            source_url=page["url"],
-        )
-    except Exception as exc:
-        logger.error(f"Database error while ingesting website page: {exc}")
-        raise HTTPException(status_code=500, detail=f"Failed to record website page in database: {str(exc)}")
-
-    try:
-        stored = store_chunks(chunks, doc_id)
-    except Exception as exc:
-        logger.error(f"ChromaDB error for website doc {doc_id}: {exc}")
-        raise HTTPException(status_code=500, detail=f"Failed to index website page in vector database: {str(exc)}")
-
-    try:
-        store_document_question_suggestions(
-            document_id=doc_id,
-            questions=suggested_questions,
-            source_hint=page["url"],
-        )
-    except Exception as exc:
-        logger.warning(
-            "Failed to persist website question suggestions",
-            extra={"doc_id": doc_id, "error": str(exc)},
-        )
 
     return {
-        "doc_id": doc_id,
-        "url": page["url"],
-        "domain": page["domain"],
-        "title": page["title"],
-        "chunks_indexed": stored,
-        "file_size": page["file_size"],
+        "mode": "single_page",
+        "doc_id": result["doc_id"],
+        "url": result["url"],
+        "domain": result["domain"],
+        "title": result["title"],
+        "pages_indexed": 1,
+        "chunks_indexed": result["chunks_indexed"],
         "source_type": "official_site",
-        "suggested_questions": suggested_questions[:6],
+        "suggested_questions": result["suggested_questions"][:6],
     }
 
 

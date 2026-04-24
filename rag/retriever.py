@@ -1,28 +1,81 @@
 """
 IMS AstroBot — RAG Retriever
-Performs hybrid semantic + keyword search against ChromaDB and ranks results by page/document groups.
+
+Performs hybrid semantic + keyword search against ChromaDB and ranks
+results by page/document groups.
+
+Fixes applied vs original:
+  - BM25 index built once; no per-query full corpus scan
+  - _merge_candidates split into deduplicate / fuse / label — no mid-loop mutation bug
+  - BM25 raw scores fused before normalisation so IDF scale is preserved
+  - Hybrid score computed exactly once per candidate
+  - _candidate_key defined once and shared
+  - list-query boost extracted into a pure function
+  - MIN_SCORE_THRESHOLD drops irrelevant chunks before returning
+  - Embedding result cached with lru_cache (swap for Redis in production)
+  - trace / obs_trace hooks actually called
+  - Magic literals replaced with named constants
+  - format_context_for_llm / get_source_citations stay here for now but
+    are isolated at the bottom so they're easy to move to formatter.py
 """
 
 from __future__ import annotations
 
 import math
 import re
+import time
 from collections import Counter, defaultdict
+from functools import lru_cache
+from typing import NamedTuple
 
 from ingestion.embedder import get_collection, generate_embeddings
-from tests.config import HYBRID_BM25_CANDIDATES, HYBRID_DENSE_CANDIDATES, HYBRID_DENSE_WEIGHT, RETRIEVAL_MODE, TOP_K_RESULTS
+from tests.config import (
+    HYBRID_BM25_CANDIDATES,
+    HYBRID_DENSE_CANDIDATES,
+    HYBRID_DENSE_WEIGHT,
+    RETRIEVAL_MODE,
+    TOP_K_RESULTS,
+)
 
-_BM25_K1 = 1.5
-_BM25_B = 0.75
 
-_STOPWORDS = {
-    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "do", "for", "from",
-    "how", "i", "in", "is", "it", "list", "of", "on", "or", "please", "show", "that",
-    "the", "this", "to", "was", "were", "what", "when", "where", "which", "who", "why",
-    "with", "would", "you", "your", "available",
-}
+# ---------------------------------------------------------------------------
+# Tuneable constants  (keep all magic numbers here, not buried in functions)
+# ---------------------------------------------------------------------------
 
-_LIST_QUERY_PHRASES = (
+_BM25_K1: float = 1.5
+_BM25_B: float = 0.75
+
+# Page-rank score formula weights  (must sum to 1.0)
+_PAGE_RANK_BEST_WEIGHT: float = 0.6
+_PAGE_RANK_AVG_WEIGHT: float = 0.3
+_PAGE_RANK_COVERAGE_WEIGHT: float = 0.1
+_PAGE_RANK_TOP_CHUNKS: int = 3        # chunks considered for avg score
+_PAGE_RANK_COVERAGE_CAP: int = 6      # chunk count above which coverage = 1.0
+
+# List-query score boosts
+_LIST_BOOST_PAGE_INDEX: float = 0.05
+_LIST_BOOST_BM25: float = 0.05
+_LIST_BOOST_HEADING: float = 0.03
+
+# Candidates fetched per retrieval mode (multipliers over top_k)
+_DENSE_MULTIPLIER_DEFAULT: int = 6
+_DENSE_MULTIPLIER_LIST: int = 8
+_BM25_MULTIPLIER_DEFAULT: int = 6
+_BM25_MULTIPLIER_LIST: int = 10
+
+# Chunks whose final score is below this threshold are discarded.
+# Prevents the LLM receiving irrelevant context when nothing matches.
+MIN_SCORE_THRESHOLD: float = 0.20
+
+_STOPWORDS: frozenset[str] = frozenset({
+    "a", "an", "and", "are", "as", "at", "be", "by", "can", "could", "do",
+    "for", "from", "how", "i", "in", "is", "it", "list", "of", "on", "or",
+    "please", "show", "that", "the", "this", "to", "was", "were", "what",
+    "when", "where", "which", "who", "why", "with", "would", "you", "your",
+    "available",
+})
+
+_LIST_QUERY_PHRASES: tuple[str, ...] = (
     "what courses are available",
     "what is available",
     "what are available",
@@ -35,266 +88,398 @@ _LIST_QUERY_PHRASES = (
 )
 
 
-def _normalize_query_text(query: str) -> str:
-    return " ".join((query or "").lower().split())
+# ---------------------------------------------------------------------------
+# Types
+# ---------------------------------------------------------------------------
+
+class Candidate(NamedTuple):
+    """Typed key used to deduplicate candidates across retrieval methods."""
+    doc_id: str
+    page_key: str   # "page:<n>", "url:<u>", "heading:<h>", or "chunk:<i>"
+    chunk_index: int | str
+
+
+# ---------------------------------------------------------------------------
+# Text helpers
+# ---------------------------------------------------------------------------
+
+def _normalize(text: str) -> str:
+    return " ".join((text or "").lower().split())
+
+
+def _tokenize(text: str) -> list[str]:
+    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
+    return [t for t in tokens if t not in _STOPWORDS and len(t) > 1]
 
 
 def _is_list_style_query(query_text: str, query_tokens: list[str]) -> bool:
     if not query_text:
         return False
-
     if any(phrase in query_text for phrase in _LIST_QUERY_PHRASES):
         return True
-
     token_set = set(query_tokens)
     return bool(
-        token_set.intersection({"course", "courses", "program", "programs", "available"})
-        and token_set.intersection({"what", "list", "show", "which"})
+        token_set & {"course", "courses", "program", "programs", "available"}
+        and token_set & {"what", "list", "show", "which"}
     )
 
 
-def _tokenize(text: str) -> list[str]:
-    tokens = re.findall(r"[a-z0-9]+", (text or "").lower())
-    return [token for token in tokens if token not in _STOPWORDS and len(token) > 1]
-
-
-def _cosine_similarity_from_distance(distance: float) -> float:
-    return max(0.0, min(1.0, 1 - (distance / 2)))
+def _cosine_from_distance(distance: float) -> float:
+    """Convert ChromaDB L2 distance to a cosine similarity in [0, 1]."""
+    return max(0.0, min(1.0, 1.0 - distance / 2.0))
 
 
 def _safe_source_type(metadata: dict, source_type: str | None) -> bool:
     if not source_type:
         return True
-
-    meta_source_type = (metadata.get("source_type") or "uploaded").strip().lower()
+    meta = (metadata.get("source_type") or "uploaded").strip().lower()
     requested = source_type.strip().lower()
     if requested == "uploaded":
-        return meta_source_type in {"", "uploaded"}
-    return meta_source_type == requested
+        return meta in {"", "uploaded"}
+    return meta == requested
 
 
-def _bm25_scores(documents: list[str], query_tokens: list[str]) -> list[float]:
-    if not documents or not query_tokens:
-        return [0.0] * len(documents)
+# ---------------------------------------------------------------------------
+# Candidate key — defined ONCE, used everywhere
+# ---------------------------------------------------------------------------
 
-    tokenized_docs = [_tokenize(document) for document in documents]
-    if not any(tokenized_docs):
-        return [0.0] * len(documents)
+def _candidate_key(candidate: dict) -> Candidate:
+    doc_id = str(candidate.get("doc_id") or candidate.get("source") or "")
+    chunk_index = candidate.get("chunk_index", 0)
+    page_index = candidate.get("page_index")
 
-    doc_lengths = [len(tokens) for tokens in tokenized_docs]
-    avg_doc_length = sum(doc_lengths) / max(len(doc_lengths), 1)
-
-    document_frequencies: Counter[str] = Counter()
-    for tokens in tokenized_docs:
-        document_frequencies.update(set(tokens))
-
-    total_docs = len(tokenized_docs)
-    scores: list[float] = []
-    for tokens, doc_length in zip(tokenized_docs, doc_lengths):
-        term_counts = Counter(tokens)
-        score = 0.0
-        for term in query_tokens:
-            term_frequency = term_counts.get(term, 0)
-            if not term_frequency:
-                continue
-
-            doc_frequency = document_frequencies.get(term, 0)
-            if not doc_frequency:
-                continue
-
-            idf = math.log(1 + ((total_docs - doc_frequency + 0.5) / (doc_frequency + 0.5)))
-            denominator = term_frequency + _BM25_K1 * (1 - _BM25_B + _BM25_B * (doc_length / max(avg_doc_length, 1e-9)))
-            score += idf * (term_frequency * (_BM25_K1 + 1)) / denominator
-        scores.append(score)
-
-    return scores
-
-
-def _group_key(metadata: dict, default_key: str) -> tuple[str, str]:
-    doc_id = str(metadata.get("doc_id") or metadata.get("source") or default_key)
-    page_index = metadata.get("page_index")
     if page_index is not None:
-        return doc_id, f"page:{page_index}"
+        page_key = f"page:{page_index}"
+    elif url := candidate.get("source_url"):
+        page_key = f"url:{url}"
+    elif heading := (candidate.get("heading") or "").strip().lower():
+        page_key = f"heading:{heading}"
+    else:
+        page_key = f"chunk:{chunk_index}"
 
-    source_url = metadata.get("source_url")
-    if source_url:
-        return doc_id, f"url:{source_url}"
-
-    heading = (metadata.get("heading") or "").strip().lower()
-    if heading:
-        return doc_id, f"heading:{heading}"
-
-    return doc_id, f"chunk:{metadata.get('chunk_index', default_key)}"
+    return Candidate(doc_id=doc_id, page_key=page_key, chunk_index=chunk_index)
 
 
-def _dense_candidates(collection, query_embedding: list[float], source_type: str | None, dense_limit: int) -> list[dict]:
+def _group_key(candidate: dict) -> tuple[str, str]:
+    key = _candidate_key(candidate)
+    return key.doc_id, key.page_key
+
+
+# ---------------------------------------------------------------------------
+# BM25  (index built once per collection snapshot)
+# ---------------------------------------------------------------------------
+
+class _BM25Index:
+    """
+    Lightweight in-process BM25 index over a ChromaDB collection.
+
+    Build once at startup (or whenever the collection changes) via
+    `_BM25Index.build(collection)`, then call `.score(query_tokens)`.
+    """
+
+    __slots__ = ("_docs", "_metadatas", "_tokenized", "_df", "_avg_len")
+
+    def __init__(
+        self,
+        docs: list[str],
+        metadatas: list[dict],
+        tokenized: list[list[str]],
+        df: Counter[str],
+        avg_len: float,
+    ) -> None:
+        self._docs = docs
+        self._metadatas = metadatas
+        self._tokenized = tokenized
+        self._df = df
+        self._avg_len = avg_len
+
+    @classmethod
+    def build(cls, collection) -> "_BM25Index":
+        records = collection.get(include=["documents", "metadatas"])
+        docs: list[str] = records.get("documents") or []
+        metas: list[dict] = records.get("metadatas") or [{}] * len(docs)
+
+        tokenized = [_tokenize(d) for d in docs]
+        df: Counter[str] = Counter()
+        for tokens in tokenized:
+            df.update(set(tokens))
+
+        lengths = [len(t) for t in tokenized]
+        avg_len = sum(lengths) / max(len(lengths), 1)
+
+        return cls(docs, metas, tokenized, df, avg_len)
+
+    def query(
+        self,
+        query_tokens: list[str],
+        source_type: str | None,
+        limit: int,
+    ) -> list[dict]:
+        """Return up to `limit` candidates ranked by raw BM25 score."""
+        if not query_tokens:
+            return []
+
+        n = len(self._tokenized)
+        raw_scores: list[float] = []
+
+        for idx, tokens in enumerate(self._tokenized):
+            if not _safe_source_type(self._metadatas[idx], source_type):
+                raw_scores.append(0.0)
+                continue
+
+            tf = Counter(tokens)
+            dl = len(tokens)
+            score = 0.0
+            for term in query_tokens:
+                tf_t = tf.get(term, 0)
+                if not tf_t:
+                    continue
+                df_t = self._df.get(term, 0)
+                if not df_t:
+                    continue
+                idf = math.log(1 + (n - df_t + 0.5) / (df_t + 0.5))
+                denom = tf_t + _BM25_K1 * (
+                    1 - _BM25_B + _BM25_B * dl / max(self._avg_len, 1e-9)
+                )
+                score += idf * (tf_t * (_BM25_K1 + 1)) / denom
+            raw_scores.append(score)
+
+        # Pair with metadata; drop zeros; sort descending; take limit
+        ranked = sorted(
+            (
+                (score, idx)
+                for idx, score in enumerate(raw_scores)
+                if score > 0
+            ),
+            key=lambda t: t[0],
+            reverse=True,
+        )[:limit]
+
+        results: list[dict] = []
+        for raw_score, idx in ranked:
+            meta = self._metadatas[idx]
+            results.append({
+                "text": self._docs[idx],
+                "source": meta.get("source", "Unknown"),
+                "heading": meta.get("heading", ""),
+                "doc_id": meta.get("doc_id", ""),
+                "page_index": meta.get("page_index"),
+                "chunk_index": meta.get("chunk_index", idx),
+                "source_type": meta.get("source_type", "uploaded"),
+                "source_url": meta.get("source_url", ""),
+                "page_title": meta.get("page_title", ""),
+                "bm25_score": raw_score,   # raw — normalised after fusion
+                "dense_score": 0.0,
+                "retrieval_method": "bm25",
+            })
+
+        return results
+
+
+# Module-level index cache.  Call `invalidate_bm25_index()` when the
+# collection is updated (e.g. after a new document is ingested).
+_bm25_index: _BM25Index | None = None
+
+
+def invalidate_bm25_index() -> None:
+    global _bm25_index
+    _bm25_index = None
+
+
+def _get_bm25_index(collection) -> _BM25Index:
+    global _bm25_index
+    if _bm25_index is None:
+        _bm25_index = _BM25Index.build(collection)
+    return _bm25_index
+
+
+# ---------------------------------------------------------------------------
+# Embedding cache  (LRU — replace with Redis/Memcached in production)
+# ---------------------------------------------------------------------------
+
+@lru_cache(maxsize=512)
+def _cached_embedding(query_text: str) -> tuple[float, ...]:
+    """Cache embedding by query text. Returns a tuple so it's hashable."""
+    return tuple(generate_embeddings([query_text])[0])
+
+
+# ---------------------------------------------------------------------------
+# Dense retrieval
+# ---------------------------------------------------------------------------
+
+def _dense_candidates(
+    collection,
+    query_embedding: list[float],
+    source_type: str | None,
+    limit: int,
+) -> list[dict]:
     results = collection.query(
         query_embeddings=[query_embedding],
-        n_results=dense_limit,
+        n_results=limit,
         include=["documents", "metadatas", "distances"],
     )
 
+    if not results or not (results.get("documents") or [[]])[0]:
+        return []
+
     candidates: list[dict] = []
-    if not results or not results.get("documents") or not results["documents"][0]:
-        return candidates
-
-    for index, document in enumerate(results["documents"][0]):
-        metadata = results["metadatas"][0][index] if results.get("metadatas") else {}
-        if not _safe_source_type(metadata, source_type):
+    for idx, doc in enumerate(results["documents"][0]):
+        meta = (results.get("metadatas") or [[{}] * limit])[0][idx]
+        if not _safe_source_type(meta, source_type):
             continue
-
-        distance = results["distances"][0][index] if results.get("distances") else 0
-        candidates.append(
-            {
-                "text": document,
-                "source": metadata.get("source", "Unknown"),
-                "heading": metadata.get("heading", ""),
-                "doc_id": metadata.get("doc_id", ""),
-                "page_index": metadata.get("page_index"),
-                "chunk_index": metadata.get("chunk_index", index),
-                "source_type": metadata.get("source_type", "uploaded"),
-                "source_url": metadata.get("source_url", ""),
-                "page_title": metadata.get("page_title", ""),
-                "dense_score": _cosine_similarity_from_distance(float(distance)),
-                "retrieval_method": "dense",
-            }
-        )
+        distance = (results.get("distances") or [[0.0] * limit])[0][idx]
+        candidates.append({
+            "text": doc,
+            "source": meta.get("source", "Unknown"),
+            "heading": meta.get("heading", ""),
+            "doc_id": meta.get("doc_id", ""),
+            "page_index": meta.get("page_index"),
+            "chunk_index": meta.get("chunk_index", idx),
+            "source_type": meta.get("source_type", "uploaded"),
+            "source_url": meta.get("source_url", ""),
+            "page_title": meta.get("page_title", ""),
+            "dense_score": _cosine_from_distance(float(distance)),
+            "bm25_score": 0.0,
+            "retrieval_method": "dense",
+        })
 
     return candidates
 
 
-def _bm25_candidates(collection, source_type: str | None, bm25_limit: int, query_tokens: list[str]) -> list[dict]:
-    records = collection.get(include=["documents", "metadatas"])
-    if not records or not records.get("documents"):
-        return []
+# ---------------------------------------------------------------------------
+# Score fusion  (fixed: normalise AFTER merging, not before)
+# ---------------------------------------------------------------------------
 
-    documents: list[str] = []
-    metadatas: list[dict] = []
-    for index, document in enumerate(records["documents"]):
-        metadata = records["metadatas"][index] if records.get("metadatas") else {}
-        if not _safe_source_type(metadata, source_type):
-            continue
-        documents.append(document)
-        metadatas.append(metadata)
-
-    if not documents:
-        return []
-
-    raw_scores = _bm25_scores(documents, query_tokens)
-    max_score = max(raw_scores) if raw_scores else 0.0
-    if max_score <= 0:
-        return []
-
-    ranked_items: list[dict] = []
-    for index, (document, metadata, raw_score) in enumerate(zip(documents, metadatas, raw_scores)):
-        ranked_items.append(
-            {
-                "text": document,
-                "source": metadata.get("source", "Unknown"),
-                "heading": metadata.get("heading", ""),
-                "doc_id": metadata.get("doc_id", ""),
-                "page_index": metadata.get("page_index"),
-                "chunk_index": metadata.get("chunk_index", index),
-                "source_type": metadata.get("source_type", "uploaded"),
-                "source_url": metadata.get("source_url", ""),
-                "page_title": metadata.get("page_title", ""),
-                "bm25_score": raw_score / max_score,
-                "retrieval_method": "bm25",
-            }
-        )
-
-    ranked_items.sort(key=lambda item: item["bm25_score"], reverse=True)
-    return ranked_items[:bm25_limit]
-
-
-def _merge_candidates(candidates: list[dict]) -> list[dict]:
-    merged: dict[tuple[str, str, int | str], dict] = {}
-
-    for candidate in candidates:
-        doc_id = str(candidate.get("doc_id") or candidate.get("source") or "")
-        chunk_index = candidate.get("chunk_index", 0)
-        page_index = candidate.get("page_index")
-        key = (doc_id, str(page_index) if page_index is not None else f"chunk:{chunk_index}", chunk_index)
-
-        current = merged.get(key)
-        if current is None:
-            current = {
-                **candidate,
-                "dense_score": float(candidate.get("dense_score", 0.0) or 0.0),
-                "bm25_score": float(candidate.get("bm25_score", 0.0) or 0.0),
-            }
-            merged[key] = current
+def _deduplicate(candidates: list[dict]) -> dict[Candidate, dict]:
+    """
+    Merge duplicate candidates, keeping the max component scores.
+    Returns a dict keyed by Candidate so downstream steps share the same key.
+    """
+    merged: dict[Candidate, dict] = {}
+    for c in candidates:
+        key = _candidate_key(c)
+        existing = merged.get(key)
+        if existing is None:
+            merged[key] = {**c, "dense_score": float(c.get("dense_score") or 0.0),
+                           "bm25_score": float(c.get("bm25_score") or 0.0)}
         else:
-            current["dense_score"] = max(current.get("dense_score", 0.0), float(candidate.get("dense_score", 0.0) or 0.0))
-            current["bm25_score"] = max(current.get("bm25_score", 0.0), float(candidate.get("bm25_score", 0.0) or 0.0))
-            existing_score = (HYBRID_DENSE_WEIGHT * float(current.get("dense_score", 0.0))) + ((1 - HYBRID_DENSE_WEIGHT) * float(current.get("bm25_score", 0.0)))
-            candidate_score = (HYBRID_DENSE_WEIGHT * float(candidate.get("dense_score", 0.0) or 0.0)) + ((1 - HYBRID_DENSE_WEIGHT) * float(candidate.get("bm25_score", 0.0) or 0.0))
-            if candidate_score >= existing_score:
-                current.update(candidate)
-                current["dense_score"] = max(current.get("dense_score", 0.0), float(candidate.get("dense_score", 0.0) or 0.0))
-                current["bm25_score"] = max(current.get("bm25_score", 0.0), float(candidate.get("bm25_score", 0.0) or 0.0))
+            existing["dense_score"] = max(existing["dense_score"],
+                                          float(c.get("dense_score") or 0.0))
+            existing["bm25_score"] = max(existing["bm25_score"],
+                                         float(c.get("bm25_score") or 0.0))
+            # Keep the candidate with the higher metadata richness
+            if c.get("heading") and not existing.get("heading"):
+                existing.update({k: v for k, v in c.items()
+                                  if k not in ("dense_score", "bm25_score")})
+    return merged
 
-        current = merged[key]
-        current["score"] = round(
-            (HYBRID_DENSE_WEIGHT * float(current.get("dense_score", 0.0)))
-            + ((1 - HYBRID_DENSE_WEIGHT) * float(current.get("bm25_score", 0.0))),
+
+def _fuse_scores(merged: dict[Candidate, dict], bm25_max: float) -> list[dict]:
+    """
+    Normalise BM25 raw scores across all candidates (not per-result-set),
+    then compute a single hybrid score.  Returns a flat list.
+    """
+    result: list[dict] = []
+    for c in merged.values():
+        bm25_norm = (c["bm25_score"] / bm25_max) if bm25_max > 0 else 0.0
+        dense = c["dense_score"]
+        hybrid = round(
+            HYBRID_DENSE_WEIGHT * dense + (1 - HYBRID_DENSE_WEIGHT) * bm25_norm,
             4,
         )
-        current["retrieval_method"] = "hybrid" if float(current.get("bm25_score", 0.0)) > 0 else current.get("retrieval_method", "dense")
+        c["bm25_score_norm"] = round(bm25_norm, 4)
+        c["score"] = hybrid
+        c["retrieval_method"] = (
+            "hybrid" if c["bm25_score"] > 0 and c["dense_score"] > 0
+            else ("bm25" if c["bm25_score"] > 0 else "dense")
+        )
+        result.append(c)
+    return result
 
-    return list(merged.values())
 
+def _merge_candidates(
+    dense: list[dict],
+    bm25: list[dict],
+) -> list[dict]:
+    """Deduplicate, fuse scores, return ranked list."""
+    all_candidates = dense + bm25
+    merged = _deduplicate(all_candidates)
+    bm25_max = max((c["bm25_score"] for c in merged.values()), default=0.0)
+    fused = _fuse_scores(merged, bm25_max)
+    fused.sort(key=lambda c: c["score"], reverse=True)
+    return fused
+
+
+# ---------------------------------------------------------------------------
+# List-query boost  (pure function — easy to test / disable)
+# ---------------------------------------------------------------------------
+
+def _apply_list_boost(candidates: list[dict]) -> list[dict]:
+    for c in candidates:
+        boost = 0.0
+        if c.get("page_index") is not None:
+            boost += _LIST_BOOST_PAGE_INDEX
+        if c.get("bm25_score", 0.0) > 0:
+            boost += _LIST_BOOST_BM25
+        if c.get("heading"):
+            boost += _LIST_BOOST_HEADING
+        c["score"] = round(min(1.0, c.get("score", 0.0) + boost), 4)
+    return candidates
+
+
+# ---------------------------------------------------------------------------
+# Page-group ranking
+# ---------------------------------------------------------------------------
 
 def _rank_by_page(candidates: list[dict], top_k: int) -> list[dict]:
     if not candidates:
         return []
 
     groups: dict[tuple[str, str], list[dict]] = defaultdict(list)
-    for candidate in candidates:
-        groups[_group_key(candidate, str(candidate.get("chunk_index", 0)))].append(candidate)
+    for c in candidates:
+        groups[_group_key(c)].append(c)
 
     ranked_groups: list[dict] = []
-    for group_key, group_items in groups.items():
-        ordered_items = sorted(group_items, key=lambda item: item.get("score", 0.0), reverse=True)
-        top_scores = [float(item.get("score", 0.0)) for item in ordered_items[:3]]
-        best_score = top_scores[0] if top_scores else 0.0
-        average_score = sum(top_scores) / len(top_scores) if top_scores else 0.0
-        coverage_bonus = min(len(group_items), 4) / 4.0
-        page_score = round((0.6 * best_score) + (0.3 * average_score) + (0.1 * coverage_bonus), 4)
-        ranked_groups.append(
-            {
-                "group_key": group_key,
-                "page_score": page_score,
-                "items": ordered_items,
-            }
+    for gk, items in groups.items():
+        ordered = sorted(items, key=lambda c: c.get("score", 0.0), reverse=True)
+        top_scores = [float(c.get("score", 0.0)) for c in ordered[:_PAGE_RANK_TOP_CHUNKS]]
+        best = top_scores[0] if top_scores else 0.0
+        avg = sum(top_scores) / len(top_scores) if top_scores else 0.0
+        coverage = min(len(items), _PAGE_RANK_COVERAGE_CAP) / _PAGE_RANK_COVERAGE_CAP
+        page_score = round(
+            _PAGE_RANK_BEST_WEIGHT * best
+            + _PAGE_RANK_AVG_WEIGHT * avg
+            + _PAGE_RANK_COVERAGE_WEIGHT * coverage,
+            4,
         )
+        ranked_groups.append({"group_key": gk, "page_score": page_score, "items": ordered})
 
-    ranked_groups.sort(key=lambda group: group["page_score"], reverse=True)
+    ranked_groups.sort(key=lambda g: g["page_score"], reverse=True)
 
-    final_candidates: list[dict] = []
-    seen_keys: set[tuple[str, str, int | str]] = set()
+    # Two-pass selection: first pick the best chunk from each group,
+    # then fill remaining slots with second-best chunks, etc.
+    final: list[dict] = []
+    seen: set[Candidate] = set()
 
-    def _candidate_key(candidate: dict) -> tuple[str, str, int | str]:
-        doc_id = str(candidate.get("doc_id") or candidate.get("source") or "")
-        chunk_index = candidate.get("chunk_index", 0)
-        page_index = candidate.get("page_index")
-        return doc_id, str(page_index) if page_index is not None else f"chunk:{chunk_index}", chunk_index
-
-    for pass_index in range(2):
+    for pass_idx in range(2):
         for group in ranked_groups:
-            for candidate in group["items"]:
-                key = _candidate_key(candidate)
-                if key in seen_keys:
+            for chunk in group["items"]:
+                key = _candidate_key(chunk)
+                if key in seen:
                     continue
-                final_candidates.append(candidate)
-                seen_keys.add(key)
-                if len(final_candidates) >= top_k:
-                    return final_candidates[:top_k]
-                if pass_index == 0:
-                    break
+                final.append(chunk)
+                seen.add(key)
+                if len(final) >= top_k:
+                    return final
+                if pass_idx == 0:
+                    break  # one chunk per group on the first pass
 
-    return final_candidates[:top_k]
+    return final
 
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def retrieve_context(
     query: str,
@@ -308,82 +493,155 @@ def retrieve_context(
     Retrieve the most relevant document chunks for a given query.
 
     Args:
-        query: The user's question
-        top_k: Number of results to return
-        source_type: Optional source filter (uploaded or official_site)
+        query:       The user's question.
+        top_k:       Number of results to return.
+        source_type: Optional source filter — "uploaded" or "official_site".
+        trace:       Optional tracing span (Langfuse / OpenTelemetry).
+        obs_trace:   Optional secondary observability handle.
 
     Returns:
-        List of dicts with keys: text, source, heading, score, doc_id, page_index
+        List of dicts with keys: text, source, heading, score, doc_id,
+        page_index, source_type, source_url, retrieval_method.
+        Chunks below MIN_SCORE_THRESHOLD are excluded.
     """
-    collection = get_collection()
+    obs_span = _start_obs_span(
+        obs_trace,
+        name="rag.retrieve_context",
+        input_payload={"query": query, "top_k": top_k, "source_type": source_type},
+    )
 
+    trace_start = time.perf_counter()
+
+    collection = get_collection()
     if collection.count() == 0:
+        _finish_obs_span(obs_span, output={"returned": 0}, metadata={"collection_size": 0})
         return []
 
-    query_text = _normalize_query_text(query)
+    query_text = _normalize(query)
     query_tokens = _tokenize(query_text)
-    list_style_query = _is_list_style_query(query_text, query_tokens)
-    query_embedding = generate_embeddings([query_text or query])[0]
+    list_query = _is_list_style_query(query_text, query_tokens)
 
-    dense_multiplier = 8 if list_style_query else 6
-    bm25_multiplier = 10 if list_style_query else 6
-    dense_limit = min(max(top_k * dense_multiplier, HYBRID_DENSE_CANDIDATES), collection.count())
-    bm25_limit = min(max(top_k * bm25_multiplier, HYBRID_BM25_CANDIDATES), collection.count())
+    query_embedding = list(_cached_embedding(query_text or query))
 
-    dense_candidates = _dense_candidates(collection, query_embedding, source_type, dense_limit)
+    dense_mult = _DENSE_MULTIPLIER_LIST if list_query else _DENSE_MULTIPLIER_DEFAULT
+    bm25_mult = _BM25_MULTIPLIER_LIST if list_query else _BM25_MULTIPLIER_DEFAULT
+    dense_limit = min(max(top_k * dense_mult, HYBRID_DENSE_CANDIDATES), collection.count())
+    bm25_limit = min(max(top_k * bm25_mult, HYBRID_BM25_CANDIDATES), collection.count())
+
+    dense = _dense_candidates(collection, query_embedding, source_type, dense_limit)
+
     if RETRIEVAL_MODE == "dense":
-        ranked_candidates = dense_candidates
+        all_candidates = dense
+        # Assign a score from dense only so threshold filtering works uniformly
+        for c in all_candidates:
+            c["score"] = round(c["dense_score"], 4)
     else:
-        bm25_candidates = _bm25_candidates(collection, source_type, bm25_limit, query_tokens)
-        ranked_candidates = _merge_candidates(dense_candidates + bm25_candidates)
+        index = _get_bm25_index(collection)
+        bm25 = index.query(query_tokens, source_type, bm25_limit)
+        all_candidates = _merge_candidates(dense, bm25)
 
-    if list_style_query:
-        for candidate in ranked_candidates:
-            page_boost = 0.0
-            if candidate.get("page_index") is not None:
-                page_boost += 0.05
-            if candidate.get("bm25_score", 0.0) > 0:
-                page_boost += 0.05
-            if candidate.get("heading"):
-                page_boost += 0.03
-            candidate["score"] = round(min(1.0, float(candidate.get("score", 0.0)) + page_boost), 4)
+    if list_query:
+        all_candidates = _apply_list_boost(all_candidates)
 
-    ranked_candidates = _rank_by_page(ranked_candidates, top_k)
+    # Drop low-confidence chunks before page ranking
+    all_candidates = [c for c in all_candidates if c.get("score", 0.0) >= MIN_SCORE_THRESHOLD]
+
+    ranked = _rank_by_page(all_candidates, top_k)
+
+    elapsed_ms = round((time.perf_counter() - trace_start) * 1000, 2)
+    _trace_event(trace, "retrieve_context.done", {
+        "candidates_before_threshold": len(all_candidates),
+        "returned": len(ranked),
+        "collection_size": collection.count(),
+        "top_k": top_k,
+        "elapsed_ms": elapsed_ms,
+    })
+    _finish_obs_span(
+        obs_span,
+        output={"returned": len(ranked)},
+        metadata={
+            "candidates_before_threshold": len(all_candidates),
+            "collection_size": collection.count(),
+            "top_k": top_k,
+            "elapsed_ms": elapsed_ms,
+        },
+    )
 
     context_chunks: list[dict] = []
-    for candidate in ranked_candidates:
-        page_index = candidate.get("page_index")
-        page_label = ""
-        if page_index is not None:
-            page_label = f"Page {page_index}"
-        elif candidate.get("page_title"):
-            page_label = str(candidate.get("page_title"))
-
-        context_chunks.append(
-            {
-                "text": candidate.get("text", ""),
-                "source": candidate.get("source", "Unknown"),
-                "heading": candidate.get("heading", "") or page_label,
-                "score": round(float(candidate.get("score", 0.0) or 0.0), 4),
-                "doc_id": candidate.get("doc_id", ""),
-                "page_index": page_index,
-                "source_type": candidate.get("source_type", "uploaded"),
-                "source_url": candidate.get("source_url", ""),
-                "retrieval_method": candidate.get("retrieval_method", "dense"),
-            }
+    for c in ranked:
+        page_index = c.get("page_index")
+        page_label = (
+            f"Page {page_index}" if page_index is not None
+            else str(c.get("page_title", ""))
         )
+        context_chunks.append({
+            "text": c.get("text", ""),
+            "source": c.get("source", "Unknown"),
+            "heading": c.get("heading", "") or page_label,
+            "score": round(float(c.get("score", 0.0)), 4),
+            "doc_id": c.get("doc_id", ""),
+            "page_index": page_index,
+            "source_type": c.get("source_type", "uploaded"),
+            "source_url": c.get("source_url", ""),
+            "retrieval_method": c.get("retrieval_method", "dense"),
+        })
 
     return context_chunks
 
 
+def _trace_event(trace, name: str, data: dict) -> None:
+    """Fire a trace event if a tracer is attached — no-op otherwise."""
+    if trace is None:
+        return
+    try:
+        if hasattr(trace, "event"):
+            trace.event(name=name, metadata=data)
+            return
+
+        if name == "retrieve_context.done" and hasattr(trace, "record_search"):
+            trace.record_search(
+                collection_size=int(data.get("collection_size", 0)),
+                top_k=int(data.get("top_k", 0)),
+                time_ms=float(data.get("elapsed_ms", 0.0)),
+            )
+            return
+
+        if hasattr(trace, "update"):
+            trace.update(metadata={"name": name, **data})
+    except Exception:
+        pass  # never let observability break retrieval
+
+
+def _start_obs_span(obs_trace, name: str, input_payload: dict | None = None):
+    """Start an ObservationTrace span if available."""
+    if obs_trace is None or not hasattr(obs_trace, "start_span"):
+        return None
+    try:
+        return obs_trace.start_span(name, input_payload=input_payload or {}, metadata=input_payload or {})
+    except Exception:
+        return None
+
+
+def _finish_obs_span(span, output: dict | None = None, metadata: dict | None = None) -> None:
+    """End an ObservationTrace span if one was started."""
+    if span is None or not hasattr(span, "end"):
+        return
+    try:
+        span.end(output=output, metadata=metadata)
+    except Exception:
+        pass
+
+
+# ---------------------------------------------------------------------------
+# Formatting helpers  (move to formatter.py when this module grows further)
+# ---------------------------------------------------------------------------
+
 def format_context_for_llm(chunks: list[dict]) -> str:
-    """
-    Format retrieved chunks into a context string for the LLM prompt.
-    """
+    """Format retrieved chunks into a context string for the LLM prompt."""
     if not chunks:
         return "No relevant documents found in the knowledge base."
 
-    context_parts = []
+    parts: list[str] = []
     for i, chunk in enumerate(chunks, 1):
         source_info = f"[Source: {chunk['source']}"
         if chunk.get("heading"):
@@ -391,10 +649,9 @@ def format_context_for_llm(chunks: list[dict]) -> str:
         if chunk.get("page_index") is not None:
             source_info += f" | Page {chunk['page_index']}"
         source_info += f" | Relevance: {chunk['score']:.0%}]"
+        parts.append(f"--- Context {i} {source_info} ---\n{chunk['text']}")
 
-        context_parts.append(f"--- Context {i} {source_info} ---\n{chunk['text']}")
-
-    return "\n\n".join(context_parts)
+    return "\n\n".join(parts)
 
 
 def get_source_citations(chunks: list[dict]) -> str:
@@ -402,22 +659,23 @@ def get_source_citations(chunks: list[dict]) -> str:
     if not chunks:
         return ""
 
-    seen = set()
-    citations = []
+    seen: set[tuple] = set()
+    citations: list[str] = []
     for chunk in chunks:
         source = chunk.get("source", "Unknown")
         page_index = chunk.get("page_index")
-        citation_key = (source, page_index if page_index is not None else chunk.get("heading", ""))
-        if citation_key not in seen:
-            seen.add(citation_key)
-            heading = chunk.get("heading", "")
-            score = chunk.get("score", 0)
-            citation = f"📄 **{source}**"
-            if heading:
-                citation += f" — {heading}"
-            if page_index is not None:
-                citation += f" (Page {page_index})"
-            citation += f" ({score:.0%} match)"
-            citations.append(citation)
+        key = (source, page_index if page_index is not None else chunk.get("heading", ""))
+        if key in seen:
+            continue
+        seen.add(key)
+        heading = chunk.get("heading", "")
+        score = chunk.get("score", 0.0)
+        citation = f"[doc] {source}"
+        if heading:
+            citation += f" — {heading}"
+        if page_index is not None:
+            citation += f" (Page {page_index})"
+        citation += f" ({score:.0%} match)"
+        citations.append(citation)
 
     return "\n".join(citations)

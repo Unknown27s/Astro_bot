@@ -59,11 +59,15 @@ export const uploadDocument = (file, uploadedBy) => {
   return fileApi.post('/documents/upload', formData);
 };
 
-export const ingestOfficialSite = (url, title, uploadedBy) =>
+export const ingestOfficialSite = (url, title, uploadedBy, options = {}) =>
   api.post('/documents/ingest-url', {
     url,
     title,
     uploaded_by: uploadedBy,
+    crawl_site: Boolean(options.crawlSite),
+    max_pages: Number(options.maxPages ?? 25),
+    max_depth: Number(options.maxDepth ?? 2),
+    delay_seconds: Number(options.delaySeconds ?? 0.5),
   });
 
 export const listDocuments = () => api.get('/documents');

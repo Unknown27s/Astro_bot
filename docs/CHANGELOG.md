@@ -30,6 +30,13 @@ All notable changes to IMS AstroBot are documented in this file.
   - `start-all-servers.bat`
   - `.env.example`
 
+### 📚 Documentation Updates
+- Documented the new official-site ingestion flow in the docs overview and index.
+- Added site-crawl reading path so contributors can find the crawl UI/API behavior quickly.
+- Updated files:
+  - `docs/README.md`
+  - `docs/INDEX.md`
+
 ### ✅ Compatibility
 - No API endpoint path changes.
 - No request/response schema changes.

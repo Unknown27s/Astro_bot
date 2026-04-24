@@ -10,6 +10,7 @@ The active system is centered on:
 - ChromaDB + SentenceTransformers for retrieval
 - Hybrid retrieval with dense vectors, BM25, and HyDE fallback
 - Langfuse tracing, feedback capture, and trace monitoring
+- Official-site ingestion with single-page fetch or multi-page site crawl
 
 ---
 
@@ -67,6 +68,7 @@ These older documents remain useful for history, but some details reflect earlie
 1. Read: [architecture/QUERY_TO_VECTOR_SEARCH.md](./architecture/QUERY_TO_VECTOR_SEARCH.md)
 2. Read: [UPLOAD_API_REFERENCE.md](./UPLOAD_API_REFERENCE.md)
 3. Read: [architecture/DATABASE_SCHEMA.md](./architecture/DATABASE_SCHEMA.md)
+4. Read: [proposal_feature/official_site_ingestion_plan.md](./proposal_feature/official_site_ingestion_plan.md)
 
 ---
 
@@ -98,6 +100,7 @@ docs/
 ✅ Role-based access for students, faculty, and admins
 ✅ Upload analytics, query logs, and feedback capture
 ✅ Trace monitoring and observability
+✅ Official-site page ingestion and site crawl indexing
 ✅ Voice-to-text input using local Whisper
 
 ---

@@ -13,6 +13,10 @@ export default function DocumentsPage() {
   const [loadingData, setLoadingData] = useState(true);
   const [siteUrl, setSiteUrl] = useState('');
   const [siteTitle, setSiteTitle] = useState('');
+  const [crawlSite, setCrawlSite] = useState(true);
+  const [maxPages, setMaxPages] = useState(25);
+  const [maxDepth, setMaxDepth] = useState(2);
+  const [delaySeconds, setDelaySeconds] = useState(0.5);
 
   const load = async () => {
     setLoadingData(true);
@@ -96,9 +100,19 @@ export default function DocumentsPage() {
 
     setIngestingUrl(true);
     try {
-      const response = await ingestOfficialSite(siteUrl.trim(), siteTitle.trim(), user?.id);
+      const response = await ingestOfficialSite(siteUrl.trim(), siteTitle.trim(), user?.id, {
+        crawlSite,
+        maxPages,
+        maxDepth,
+        delaySeconds,
+      });
       const indexed = response.data?.chunks_indexed ?? 0;
-      toast.success(`Indexed official site content (${indexed} chunks)`);
+      const pagesIndexed = response.data?.pages_indexed ?? 1;
+      toast.success(
+        crawlSite
+          ? `Crawled ${pagesIndexed} page(s) and indexed ${indexed} chunk(s)`
+          : `Indexed official site content (${indexed} chunks)`
+      );
       setSiteUrl('');
       setSiteTitle('');
       load();
@@ -164,35 +178,94 @@ export default function DocumentsPage() {
       <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><FileText size={18} /> Ingest Official Site Page</h3>
-            <p className="mt-1 text-sm text-slate-300/80">Fetch one public page from the official college website and index it as a local knowledge source.</p>
+            <h3 className="flex items-center gap-2 text-lg font-semibold text-white"><FileText size={18} /> Ingest Official Site Content</h3>
+            <p className="mt-1 text-sm text-slate-300/80">Fetch a single page or crawl the whole site and index the result as local knowledge.</p>
           </div>
         </div>
 
-        <form className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3" onSubmit={handleIngestUrl}>
-          <input
-            type="url"
-            value={siteUrl}
-            onChange={(event) => setSiteUrl(event.target.value)}
-            placeholder="https://www.example.edu/about"
-            className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
-            aria-label="Official site URL"
-          />
-          <input
-            type="text"
-            value={siteTitle}
-            onChange={(event) => setSiteTitle(event.target.value)}
-            placeholder="Optional page title"
-            className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
-            aria-label="Official site title"
-          />
-          <button
-            type="submit"
-            disabled={ingestingUrl}
-            className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-300 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {ingestingUrl ? 'Fetching...' : 'Fetch & Index'}
-          </button>
+        <form className="mt-4 space-y-4" onSubmit={handleIngestUrl}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <input
+              type="url"
+              value={siteUrl}
+              onChange={(event) => setSiteUrl(event.target.value)}
+              placeholder="https://www.example.edu/about"
+              className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+              aria-label="Official site URL"
+            />
+            <input
+              type="text"
+              value={siteTitle}
+              onChange={(event) => setSiteTitle(event.target.value)}
+              placeholder="Optional page title or site label"
+              className="rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+              aria-label="Official site title"
+            />
+            <button
+              type="submit"
+              disabled={ingestingUrl}
+              className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-300 to-cyan-400 px-4 py-2.5 text-sm font-semibold text-slate-950 transition-transform hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {ingestingUrl ? (crawlSite ? 'Crawling...' : 'Fetching...') : (crawlSite ? 'Crawl & Index' : 'Fetch & Index')}
+            </button>
+          </div>
+
+          <div className="rounded-2xl border border-white/10 bg-white/5 p-4">
+            <label className="flex cursor-pointer items-start gap-3 text-sm text-slate-100">
+              <input
+                type="checkbox"
+                checked={crawlSite}
+                onChange={(event) => setCrawlSite(event.target.checked)}
+                className="mt-1 h-4 w-4 rounded border-white/20 bg-black/30 text-cyan-300 focus:ring-cyan-300/40"
+                aria-label="Crawl entire site"
+              />
+              <span>
+                <span className="block font-semibold text-white">Crawl the entire site</span>
+                <span className="block text-xs text-slate-300/80">When enabled, the crawler follows same-domain links starting from the URL you enter.</span>
+              </span>
+            </label>
+
+            {crawlSite && (
+              <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+                <label className="space-y-1">
+                  <span className="block text-xs uppercase tracking-[0.12em] text-slate-300/80">Max pages</span>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    value={maxPages}
+                    onChange={(event) => setMaxPages(Number(event.target.value))}
+                    className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+                    aria-label="Maximum number of pages to crawl"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs uppercase tracking-[0.12em] text-slate-300/80">Max depth</span>
+                  <input
+                    type="number"
+                    min="0"
+                    max="10"
+                    value={maxDepth}
+                    onChange={(event) => setMaxDepth(Number(event.target.value))}
+                    className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+                    aria-label="Maximum crawl depth"
+                  />
+                </label>
+                <label className="space-y-1">
+                  <span className="block text-xs uppercase tracking-[0.12em] text-slate-300/80">Delay seconds</span>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.1"
+                    value={delaySeconds}
+                    onChange={(event) => setDelaySeconds(Number(event.target.value))}
+                    className="w-full rounded-xl border border-white/15 bg-black/20 px-4 py-2.5 text-sm text-white outline-none placeholder:text-slate-400 focus:border-cyan-300/50"
+                    aria-label="Delay between crawler requests"
+                  />
+                </label>
+              </div>
+            )}
+          </div>
         </form>
       </section>
 
