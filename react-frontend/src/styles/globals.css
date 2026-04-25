@@ -75,7 +75,7 @@ h6 {
 }
 
 p {
-  @apply text-base text-slate-600;
+  @apply text-base;
 }
 
 small {
@@ -267,7 +267,7 @@ textarea::placeholder {
 
 .astro-chat-shell {
   position: relative;
-  background: #030712;
+  background: #ffffff;
 }
 
 .astro-nebula-bg {
@@ -297,16 +297,16 @@ textarea::placeholder {
 }
 
 .astro-glow-cyan {
-  box-shadow: 0 0 32px rgba(34, 211, 238, 0.25);
+  box-shadow: 0 0 32px rgba(255, 255, 255, 0.25);
 }
 
 .astro-glow-pink {
-  box-shadow: 0 0 30px rgba(217, 70, 239, 0.22);
+  box-shadow: 0 0 30px rgba(255, 255, 255, 0.22);
 }
 
 .astro-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(148, 163, 184, 0.6) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.6) transparent;
 }
 
 .astro-scrollbar::-webkit-scrollbar {
@@ -324,5 +324,5 @@ textarea::placeholder {
 }
 
 .astro-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: rgba(148, 163, 184, 0.65);
+  background: rgba(229, 240, 255, 0.65);
 }

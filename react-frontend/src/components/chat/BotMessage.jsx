@@ -64,7 +64,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
         </div>
 
         {/* Main Message */}
-        <div className="astro-glass-heavy max-w-3xl rounded-2xl rounded-tl-sm border border-cyan-100/20 p-4 text-slate-50 md:p-5">
+        <div className="astro-glass-heavy max-w-3xl rounded-2xl rounded-tl-sm border border-white p-4 text-slate-50 md:p-5">
           <div className="prose prose-sm max-w-none prose-headings:text-cyan-100 prose-strong:text-white prose-p:text-slate-50 prose-a:text-cyan-200 prose-code:text-cyan-100">
             <ReactMarkdown>{content}</ReactMarkdown>
           </div>
@@ -87,7 +87,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
                   </div>
                   {source.heading && <div className="mt-1 text-slate-100">{source.heading}</div>}
                   {typeof source.score === 'number' && (
-                    <div className="mt-1 text-[11px] uppercase tracking-[0.12em] text-cyan-200/85">
+                    <div className="mt-1 text-[11px] uppercase tracking-[0.12em] text-white">
                       Relevance {(source.score * 100).toFixed(0)}%
                     </div>
                   )}
