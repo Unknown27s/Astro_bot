@@ -57,6 +57,19 @@ def _new_id() -> str:
 # Connection management
 # ---------------------------------------------------------------------------
 
+def get_connection() -> sqlite3.Connection:
+    """
+    Backwards-compatible raw SQLite connection.
+
+    Some modules still use explicit conn/close flows; this helper keeps those
+    call sites working while newer code can prefer the _db() context manager.
+    """
+    conn = sqlite3.connect(str(SQLITE_DB_PATH), timeout=10)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
 @contextmanager
 def _db() -> Generator[sqlite3.Connection, None, None]:
     """
@@ -453,7 +466,7 @@ def add_document(
     file_type: str,
     file_size: int,
     chunk_count: int,
-    uploaded_by: str,
+    uploaded_by: str | None,
     source_type: str = "uploaded",
     source_domain: str = "",
     source_url: str = "",
@@ -559,6 +572,7 @@ def log_trace_event(
     chunks_count: int = 0,
     provider: str = "",
     model: str = "",
+    **extra: object,
 ) -> str:
     event_id = _new_id()
     with _db() as conn:

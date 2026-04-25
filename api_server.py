@@ -715,7 +715,8 @@ def api_chat_audio(
     )
 
     try:
-        file_ext = Path(audio.filename).suffix.lower()
+        audio_filename = audio.filename or "audio.webm"
+        file_ext = Path(audio_filename).suffix.lower()
         if not file_ext:
             file_ext = ".webm"  # Default from browser
 
@@ -920,7 +921,7 @@ def api_chat_status():
 
 @app.get("/api/suggestions")
 @limiter.limit("30/minute")
-def api_get_suggestions(request: Request, q: str = "", user_id: str = None):
+def api_get_suggestions(request: Request, q: str = "", user_id: Optional[str] = None):
     """Get autocomplete suggestions for the chat input.
     
     Returns recent user questions, popular questions,
@@ -980,7 +981,7 @@ def api_submit_feedback(req: FeedbackRequest, request: Request):
 def api_upload_document(
     request: Request,  # Required for rate limiter key extraction
     file: UploadFile = File(...),
-    uploaded_by: str = Form(None),  # Make it optional with default None
+    uploaded_by: Optional[str] = Form(None),  # Make it optional with default None
 ):
     """Upload, parse, chunk, and index a document (admin only if uploaded_by is provided)."""
     from ingestion.parser import parse_document
@@ -1000,12 +1001,13 @@ def api_upload_document(
         if user["role"] != "admin":
             raise HTTPException(status_code=403, detail="Only administrators can upload documents")
 
-    file_ext = Path(file.filename).suffix.lower()
+    original_filename = file.filename or "uploaded_file"
+    file_ext = Path(original_filename).suffix.lower()
     if file_ext not in SUPPORTED_EXTENSIONS:
         raise HTTPException(status_code=400, detail=f"Unsupported file type: {file_ext}. Supported: {', '.join(SUPPORTED_EXTENSIONS)}")
 
     # Save file to disk
-    safe_name = f"{int(time.time())}_{file.filename}"
+    safe_name = f"{int(time.time())}_{original_filename}"
     file_path = UPLOAD_DIR / safe_name
     content = file.file.read()
 
@@ -1027,7 +1029,7 @@ def api_upload_document(
             pdf_reader = PdfReader(file_path)
             if pdf_reader.is_encrypted:
                 os.remove(file_path)
-                logger.warning(f"Locked PDF rejected: {file.filename}")
+                logger.warning(f"Locked PDF rejected: {original_filename}")
                 raise HTTPException(
                     status_code=422,
                     detail=f"❌ PDF is password-protected. Please remove the password and try again."
@@ -1035,7 +1037,7 @@ def api_upload_document(
         except HTTPException:
             raise  # Re-raise our custom error
         except Exception as e:
-            logger.debug(f"PDF encryption check error for {file.filename}: {e}")
+            logger.debug(f"PDF encryption check error for {original_filename}: {e}")
             # Don't block on encryption check errors, let parsing handle it
 
     # Parse document
@@ -1043,23 +1045,23 @@ def api_upload_document(
     if not text:
         os.remove(file_path)
         error_detail = parse_error or "Failed to extract text from document"
-        logger.warning(f"Document parse failed for {file.filename}: {error_detail}")
+        logger.warning(f"Document parse failed for {original_filename}: {error_detail}")
         raise HTTPException(status_code=422, detail=error_detail)
 
     # Chunk document
-    chunks = chunk_document(text, source_name=file.filename)
+    chunks = chunk_document(text, source_name=original_filename)
     if not chunks:
         os.remove(file_path)
         raise HTTPException(status_code=422, detail="No chunks generated from document (text may be too short)")
 
     # Build question suggestions from uploaded content
-    suggested_questions = generate_document_questions(file.filename, text, chunks, limit=10)
+    suggested_questions = generate_document_questions(original_filename, text, chunks, limit=10)
 
     # Record in database
     try:
         doc_id = add_document(
             filename=safe_name,
-            original_name=file.filename,
+            original_name=original_filename,
             file_type=file_ext,
             file_size=len(content),
             chunk_count=len(chunks),
@@ -1067,7 +1069,7 @@ def api_upload_document(
         )
     except Exception as e:
         os.remove(file_path)
-        logger.error(f"Database error for {file.filename}: {e}")
+        logger.error(f"Database error for {original_filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to record document in database: {str(e)}")
 
     # Store embeddings in ChromaDB
@@ -1082,7 +1084,7 @@ def api_upload_document(
         stored_q = store_document_question_suggestions(
             document_id=doc_id,
             questions=suggested_questions,
-            source_hint=file.filename,
+            source_hint=original_filename,
         )
     except Exception as exc:
         stored_q = 0
@@ -1339,15 +1341,15 @@ class TagRequest(BaseModel):
     color: str = "#808080"
 
 class TagUpdateRequest(BaseModel):
-    name: str = None
-    description: str = None
-    color: str = None
+    name: Optional[str] = None
+    description: Optional[str] = None
+    color: Optional[str] = None
 
 class ClassificationRequest(BaseModel):
     classification: str
     confidence: float = 1.0
     auto_classified: bool = False
-    notes: str = None
+    notes: Optional[str] = None
 
 class UpdateRateLimitRequest(BaseModel):
     limit_requests: int
@@ -1469,7 +1471,11 @@ def api_get_classification(doc_id: str, request: Request):
 
 @app.get("/api/documents/search")
 @limiter.limit("30/minute")  # Search with filters
-def api_search_documents(request: Request, tags: str = None, classification: str = None):
+def api_search_documents(
+    request: Request,
+    tags: Optional[str] = None,
+    classification: Optional[str] = None,
+):
     """Search/filter documents by tags and/or classification."""
     from database.db import filter_documents_by_tags, get_documents_by_classification, get_all_documents
 
