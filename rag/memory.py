@@ -60,49 +60,56 @@ def query_memory(query: str, user_id: Optional[str] = None) -> Optional[dict]:
             where_filter = {"user_id": user_id}
             logger.debug(f"Using per-user filter: {user_id}")
         elif CONV_PER_USER:
-            where_filter = {"user_id": {"$exists": False}}
+            where_filter = {"user_id": "global"}
             logger.debug(f"Using global-only filter")
         else:
             logger.debug(f"No filter (global memory mode)")
 
         results = collection.query(
             query_embeddings=[query_embedding],
-            n_results=1,
+            n_results=5,
             where=where_filter,
         )
 
-        logger.debug(f"Query results: {len(results.get('ids', [[]])[0])} matches found")
+        ids = results.get("ids", [[]])[0] if results else []
+        distances = results.get("distances", [[]])[0] if results else []
+        metadatas = results.get("metadatas", [[]])[0] if results else []
 
-        if results and results["ids"] and len(results["ids"]) > 0:
-            # Get similarity score (distance converted to similarity)
-            distance = results["distances"][0][0] if results["distances"] else 2.0
+        logger.debug(f"Query results: {len(ids)} matches found")
+
+        if not ids:
+            logger.debug("❌ No matches found in collection")
+            return None
+
+        from database.db import memory_entry_exists, update_memory_usage
+
+        for idx, memory_id in enumerate(ids):
+            distance = distances[idx] if idx < len(distances) else 2.0
             similarity = 1 - (distance / 2)
+            if similarity < CONV_MATCH_THRESHOLD:
+                continue
 
-            logger.debug(f"Match found! Distance: {distance:.4f}, Similarity: {similarity:.4f}, Threshold: {CONV_MATCH_THRESHOLD}")
+            # Ignore stale vector entries that no longer have a backing DB row.
+            if not memory_entry_exists(memory_id):
+                try:
+                    collection.delete(ids=[memory_id])
+                except Exception:
+                    pass
+                continue
 
-            if similarity >= CONV_MATCH_THRESHOLD:
-                # Good match found
-                metadata = results["metadatas"][0][0] if results["metadatas"] else {}
-                memory_id = results["ids"][0][0]
+            metadata = metadatas[idx] if idx < len(metadatas) and metadatas[idx] else {}
+            logger.info(f"✅ CACHE HIT! Returning cached response (ID: {memory_id})")
+            update_memory_usage(memory_id, similarity)
 
-                logger.info(f"✅ CACHE HIT! Returning cached response (ID: {memory_id})")
-
-                # Update usage in database
-                from database.db import update_memory_usage
-                update_memory_usage(memory_id, similarity)
-
-                return {
-                    "memory_id": memory_id,
-                    "response": metadata.get("response_text"),
-                    "sources": json.loads(metadata.get("sources_json", "[]")),
-                    "similarity": round(similarity, 3),
-                    "created_at": metadata.get("created_at"),
-                    "usage_count": metadata.get("usage_count", 1)
-                }
-            else:
-                logger.debug(f"❌ Similarity too low ({similarity:.4f} < {CONV_MATCH_THRESHOLD})")
-        else:
-            logger.debug(f"❌ No matches found in collection")
+            return {
+                "memory_id": memory_id,
+                "response": metadata.get("response_text"),
+                "sources": json.loads(metadata.get("sources_json", "[]")),
+                "similarity": round(similarity, 3),
+                "similarity_score": round(similarity, 3),
+                "created_at": metadata.get("created_at"),
+                "usage_count": metadata.get("usage_count", 1),
+            }
         
         return None
     
@@ -116,7 +123,7 @@ def add_memory_entry(
     response: str,
     sources: list,
     user_id: Optional[str] = None
-) -> dict:
+) -> dict | bool:
     """
     Store a new Q&A pair in memory.
     
@@ -254,10 +261,20 @@ def get_memory_stats() -> dict:
         from database.db import get_memory_stats
         db_stats = get_memory_stats()
 
+        by_user = db_stats.get("by_user", [])
+        compat_by_user = [
+            {
+                "user_id": item.get("username", "Global"),
+                "cnt": item.get("entries", 0),
+                **item,
+            }
+            for item in by_user
+        ]
+
         return {
             "total_entries": db_stats.get("total_entries", 0),
             "avg_usage": db_stats.get("avg_usage_per_entry", 0),
-            "by_user": db_stats.get("by_user", []),
+            "by_user": compat_by_user,
             "status": "ok"
         }
     except Exception as e:

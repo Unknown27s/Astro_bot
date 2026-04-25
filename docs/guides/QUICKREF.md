@@ -42,6 +42,9 @@ SQLITE_DB_PATH=./data/astrobot.db
 # Auth
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=admin123
+
+# Optional: keep as one quoted line in .env; use \n for line breaks
+SYSTEM_PROMPT="You are IMS AstroBot.\n\nGuidelines:\n1. Prefer uploaded context.\n2. Keep responses concise."
 ```
 
 ---

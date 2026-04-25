@@ -98,6 +98,7 @@ Guidelines:
 5. Keep responses concise, practical, and student-friendly."""
 
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
+SYSTEM_PROMPT = SYSTEM_PROMPT.replace("\\n", "\n")
 
 # ── Conversation Memory (Semantic Cache) ──
 # Enable/disable memory feature

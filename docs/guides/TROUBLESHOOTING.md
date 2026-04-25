@@ -184,6 +184,26 @@ echo $LLM_MODE   # PowerShell
 streamlit run app.py --logger.level=debug
 ```
 
+### Issue: "python-dotenv could not parse statement starting at line ..."
+
+**Cause:** Invalid `.env` syntax, usually from unquoted multiline values (most commonly `SYSTEM_PROMPT`).
+
+**Solution:**
+```env
+# Correct (single quoted line + escaped newlines)
+SYSTEM_PROMPT="You are IMS AstroBot.\n\nGuidelines:\n1. Prefer uploaded context.\n2. Keep responses concise."
+
+# Incorrect (raw multiline value in .env)
+# SYSTEM_PROMPT=You are IMS AstroBot,
+# Guidelines:
+# 1. ...
+```
+
+```powershell
+# Validate quickly by reloading app/tests after fixing .env
+pytest tests/test_memory.py -q
+```
+
 ---
 
 ## Authentication Issues
