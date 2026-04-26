@@ -29,7 +29,16 @@ from functools import lru_cache
 from typing import NamedTuple
 
 from ingestion.embedder import get_collection, generate_embeddings
+from rag.providers.manager import get_manager
 from tests.config import (
+    FULL_PAGE_MAX_CHARS_PER_PAGE,
+    FULL_PAGE_RAG_ENABLED,
+    HYDE_ENABLED,
+    HYDE_MAX_CHARS,
+    HYDE_MAX_TOKENS,
+    HYDE_SCORE_BLEND,
+    HYDE_TEMPERATURE,
+    HYDE_TRIGGER_SCORE,
     HYBRID_BM25_CANDIDATES,
     HYBRID_DENSE_CANDIDATES,
     HYBRID_DENSE_WEIGHT,
@@ -139,6 +148,13 @@ def _safe_source_type(metadata: dict, source_type: str | None) -> bool:
     return meta == requested
 
 
+def _safe_doc_id(metadata: dict, doc_id: str | None) -> bool:
+    """Optional doc_id filter for single-document retrieval testing."""
+    if not doc_id:
+        return True
+    return str(metadata.get("doc_id") or "") == str(doc_id)
+
+
 # ---------------------------------------------------------------------------
 # Candidate key — defined ONCE, used everywhere
 # ---------------------------------------------------------------------------
@@ -213,6 +229,7 @@ class _BM25Index:
         self,
         query_tokens: list[str],
         source_type: str | None,
+        doc_id: str | None,
         limit: int,
     ) -> list[dict]:
         """Return up to `limit` candidates ranked by raw BM25 score."""
@@ -224,6 +241,9 @@ class _BM25Index:
 
         for idx, tokens in enumerate(self._tokenized):
             if not _safe_source_type(self._metadatas[idx], source_type):
+                raw_scores.append(0.0)
+                continue
+            if not _safe_doc_id(self._metadatas[idx], doc_id):
                 raw_scores.append(0.0)
                 continue
 
@@ -311,6 +331,7 @@ def _dense_candidates(
     collection,
     query_embedding: list[float],
     source_type: str | None,
+    doc_id: str | None,
     limit: int,
 ) -> list[dict]:
     results = collection.query(
@@ -326,6 +347,8 @@ def _dense_candidates(
     for idx, doc in enumerate(results["documents"][0]):
         meta = (results.get("metadatas") or [[{}] * limit])[0][idx]
         if not _safe_source_type(meta, source_type):
+            continue
+        if not _safe_doc_id(meta, doc_id):
             continue
         distance = (results.get("distances") or [[0.0] * limit])[0][idx]
         candidates.append({
@@ -427,6 +450,104 @@ def _apply_list_boost(candidates: list[dict]) -> list[dict]:
     return candidates
 
 
+def _generate_hypothetical_passage(query: str) -> str:
+    """
+    Generate a short hypothetical answer passage for HyDE retrieval.
+    Returns an empty string when generation is unavailable.
+    """
+    if not query.strip():
+        return ""
+
+    try:
+        mgr = get_manager()
+        hyde_prompt = (
+            "Write a short factual passage (3-6 sentences) that likely answers "
+            "the user question using institutional/policy language. "
+            "Do not include disclaimers or markdown.\n\n"
+            f"Question: {query}"
+        )
+        generated = mgr.generate(
+            system_prompt=(
+                "You create concise retrieval-oriented hypothetical passages "
+                "for semantic search expansion."
+            ),
+            user_message=hyde_prompt,
+            temperature=HYDE_TEMPERATURE,
+            max_tokens=HYDE_MAX_TOKENS,
+        )
+        if not generated:
+            return ""
+        return generated.strip()[:HYDE_MAX_CHARS]
+    except Exception:
+        return ""
+
+
+def _retrieve_candidates_for_text(
+    collection,
+    retrieval_text: str,
+    source_type: str | None,
+    doc_id: str | None,
+    top_k: int,
+    list_query: bool,
+) -> list[dict]:
+    """Run dense/hybrid retrieval for a given text and return scored candidates."""
+    retrieval_tokens = _tokenize(retrieval_text)
+    query_embedding = list(_cached_embedding(retrieval_text))
+
+    dense_mult = _DENSE_MULTIPLIER_LIST if list_query else _DENSE_MULTIPLIER_DEFAULT
+    bm25_mult = _BM25_MULTIPLIER_LIST if list_query else _BM25_MULTIPLIER_DEFAULT
+    dense_limit = min(max(top_k * dense_mult, HYBRID_DENSE_CANDIDATES), collection.count())
+    bm25_limit = min(max(top_k * bm25_mult, HYBRID_BM25_CANDIDATES), collection.count())
+
+    dense = _dense_candidates(collection, query_embedding, source_type, doc_id, dense_limit)
+
+    if RETRIEVAL_MODE == "dense":
+        all_candidates = dense
+        for c in all_candidates:
+            c["score"] = round(c["dense_score"], 4)
+    else:
+        index = _get_bm25_index(collection)
+        bm25 = index.query(retrieval_tokens, source_type, doc_id, bm25_limit)
+        all_candidates = _merge_candidates(dense, bm25)
+
+    if list_query:
+        all_candidates = _apply_list_boost(all_candidates)
+
+    return all_candidates
+
+
+def _blend_hyde_candidates(base_candidates: list[dict], hyde_candidates: list[dict]) -> list[dict]:
+    """Merge base and HyDE candidates, blending scores when both overlap."""
+    merged: dict[Candidate, dict] = {_candidate_key(c): {**c} for c in base_candidates}
+
+    for h in hyde_candidates:
+        key = _candidate_key(h)
+        existing = merged.get(key)
+        hyde_score = float(h.get("score", 0.0))
+
+        if existing is None:
+            merged[key] = {
+                **h,
+                "score": round(hyde_score * HYDE_SCORE_BLEND, 4),
+                "retrieval_method": f"{h.get('retrieval_method', 'dense')}_hyde",
+                "hyde_score": round(hyde_score, 4),
+            }
+            continue
+
+        base_score = float(existing.get("score", 0.0))
+        blended = ((1 - HYDE_SCORE_BLEND) * base_score) + (HYDE_SCORE_BLEND * hyde_score)
+        existing["score"] = round(max(base_score, blended), 4)
+        existing["hyde_score"] = round(hyde_score, 4)
+
+        method = str(existing.get("retrieval_method", "dense"))
+        if "hyde" not in method:
+            existing["retrieval_method"] = f"{method}+hyde"
+
+    fused = list(merged.values())
+    fused.sort(key=lambda c: c.get("score", 0.0), reverse=True)
+    return fused
+
+
 # ---------------------------------------------------------------------------
 # Page-group ranking
 # ---------------------------------------------------------------------------
@@ -477,6 +598,161 @@ def _rank_by_page(candidates: list[dict], top_k: int) -> list[dict]:
     return final
 
 
+def _to_int(value) -> int | None:
+    try:
+        if value is None or value == "":
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chunk_sort_key(metadata: dict) -> int:
+    chunk_index = _to_int((metadata or {}).get("chunk_index"))
+    return chunk_index if chunk_index is not None else 0
+
+
+def _clean_page_text(text: str) -> str:
+    """Normalize common PDF extraction artifacts for full-page context."""
+    if not text:
+        return ""
+    text = text.replace(" | ", " ").replace("|", "")
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _truncate_page_text(text: str, max_chars: int) -> str:
+    if max_chars <= 0 or len(text) <= max_chars:
+        return text
+    clipped = text[:max_chars]
+    if " " in clipped:
+        clipped = clipped.rsplit(" ", 1)[0]
+    return f"{clipped} ... [truncated]"
+
+
+def _fetch_full_page_text(
+    collection,
+    doc_id: str,
+    page_index: int,
+    source_type: str | None,
+) -> tuple[str, int]:
+    """
+    Return full text for a single page by stitching all page chunks in order.
+
+    Returns:
+        (page_text, chunk_count)
+    """
+    records = None
+
+    # Preferred path: query exactly one page from one document.
+    try:
+        records = collection.get(
+            where={"$and": [{"doc_id": doc_id}, {"page_index": page_index}]},
+            include=["documents", "metadatas"],
+        )
+    except Exception:
+        records = None
+
+    docs = (records or {}).get("documents") or []
+    metas = (records or {}).get("metadatas") or []
+
+    # Fallback path for backends that do not support combined where clauses.
+    if not docs:
+        try:
+            fallback = collection.get(where={"doc_id": doc_id}, include=["documents", "metadatas"])
+            raw_docs = fallback.get("documents") or []
+            raw_metas = fallback.get("metadatas") or []
+            filtered: list[tuple[str, dict]] = []
+            for idx, raw_doc in enumerate(raw_docs):
+                meta = raw_metas[idx] if idx < len(raw_metas) else {}
+                if not _safe_source_type(meta, source_type):
+                    continue
+                if _to_int(meta.get("page_index")) != page_index:
+                    continue
+                filtered.append((raw_doc, meta))
+        except Exception:
+            return "", 0
+    else:
+        filtered = []
+        for idx, raw_doc in enumerate(docs):
+            meta = metas[idx] if idx < len(metas) else {}
+            if not _safe_source_type(meta, source_type):
+                continue
+            filtered.append((raw_doc, meta))
+
+    if not filtered:
+        return "", 0
+
+    filtered.sort(key=lambda item: _chunk_sort_key(item[1]))
+    page_parts: list[str] = []
+
+    for raw_text, meta in filtered:
+        text = str(raw_text or "").strip()
+        heading = str((meta or {}).get("heading") or "").strip()
+        if heading and text.lower().startswith(heading.lower()):
+            text = text[len(heading):].strip()
+        cleaned = _clean_page_text(text)
+        if cleaned:
+            page_parts.append(cleaned)
+
+    full_page_text = _clean_page_text("\n".join(page_parts))
+    full_page_text = _truncate_page_text(full_page_text, FULL_PAGE_MAX_CHARS_PER_PAGE)
+    return full_page_text, len(filtered)
+
+
+def _expand_to_full_pages(
+    collection,
+    ranked_chunks: list[dict],
+    source_type: str | None,
+    top_k: int,
+) -> list[dict]:
+    """Expand top ranked chunk hits into full-page blocks for LLM context."""
+    if not ranked_chunks:
+        return []
+
+    expanded: list[dict] = []
+    seen_pages: set[tuple[str, int]] = set()
+
+    for chunk in ranked_chunks:
+        if len(expanded) >= top_k:
+            break
+
+        doc_id = str(chunk.get("doc_id") or "")
+        page_index = _to_int(chunk.get("page_index"))
+
+        # If this hit is not page-addressable, keep the original chunk.
+        if not doc_id or page_index is None:
+            expanded.append(chunk)
+            continue
+
+        page_key = (doc_id, page_index)
+        if page_key in seen_pages:
+            continue
+        seen_pages.add(page_key)
+
+        page_text, chunk_count = _fetch_full_page_text(
+            collection=collection,
+            doc_id=doc_id,
+            page_index=page_index,
+            source_type=source_type,
+        )
+
+        if not page_text:
+            expanded.append(chunk)
+            continue
+
+        enriched = {**chunk}
+        enriched["text"] = page_text
+        enriched["heading"] = enriched.get("heading") or f"Page {page_index}"
+        enriched["chunk_count"] = chunk_count
+        method = str(enriched.get("retrieval_method") or "dense")
+        if "full_page" not in method:
+            enriched["retrieval_method"] = f"{method}+full_page"
+        expanded.append(enriched)
+
+    return expanded[:top_k]
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -485,6 +761,7 @@ def retrieve_context(
     query: str,
     top_k: int = TOP_K_RESULTS,
     source_type: str | None = None,
+    doc_id: str | None = None,
     trace=None,
     obs_trace=None,
     **_kwargs,
@@ -496,18 +773,21 @@ def retrieve_context(
         query:       The user's question.
         top_k:       Number of results to return.
         source_type: Optional source filter — "uploaded" or "official_site".
+        doc_id:      Optional document ID filter for single-document retrieval.
         trace:       Optional tracing span (Langfuse / OpenTelemetry).
         obs_trace:   Optional secondary observability handle.
 
     Returns:
         List of dicts with keys: text, source, heading, score, doc_id,
         page_index, source_type, source_url, retrieval_method.
+        When FULL_PAGE_RAG_ENABLED is true, page-addressable hits are expanded
+        into full page text blocks before returning.
         Chunks below MIN_SCORE_THRESHOLD are excluded.
     """
     obs_span = _start_obs_span(
         obs_trace,
         name="rag.retrieve_context",
-        input_payload={"query": query, "top_k": top_k, "source_type": source_type},
+        input_payload={"query": query, "top_k": top_k, "source_type": source_type, "doc_id": doc_id},
     )
 
     trace_start = time.perf_counter()
@@ -521,32 +801,42 @@ def retrieve_context(
     query_tokens = _tokenize(query_text)
     list_query = _is_list_style_query(query_text, query_tokens)
 
-    query_embedding = list(_cached_embedding(query_text or query))
+    all_candidates = _retrieve_candidates_for_text(
+        collection=collection,
+        retrieval_text=query_text or query,
+        source_type=source_type,
+        doc_id=doc_id,
+        top_k=top_k,
+        list_query=list_query,
+    )
 
-    dense_mult = _DENSE_MULTIPLIER_LIST if list_query else _DENSE_MULTIPLIER_DEFAULT
-    bm25_mult = _BM25_MULTIPLIER_LIST if list_query else _BM25_MULTIPLIER_DEFAULT
-    dense_limit = min(max(top_k * dense_mult, HYBRID_DENSE_CANDIDATES), collection.count())
-    bm25_limit = min(max(top_k * bm25_mult, HYBRID_BM25_CANDIDATES), collection.count())
-
-    dense = _dense_candidates(collection, query_embedding, source_type, dense_limit)
-
-    if RETRIEVAL_MODE == "dense":
-        all_candidates = dense
-        # Assign a score from dense only so threshold filtering works uniformly
-        for c in all_candidates:
-            c["score"] = round(c["dense_score"], 4)
-    else:
-        index = _get_bm25_index(collection)
-        bm25 = index.query(query_tokens, source_type, bm25_limit)
-        all_candidates = _merge_candidates(dense, bm25)
-
-    if list_query:
-        all_candidates = _apply_list_boost(all_candidates)
+    hyde_applied = False
+    top_score = max((float(c.get("score", 0.0)) for c in all_candidates), default=0.0)
+    if HYDE_ENABLED and top_score < HYDE_TRIGGER_SCORE:
+        hyde_text = _generate_hypothetical_passage(query)
+        if hyde_text:
+            hyde_applied = True
+            hyde_candidates = _retrieve_candidates_for_text(
+                collection=collection,
+                retrieval_text=_normalize(hyde_text),
+                source_type=source_type,
+                doc_id=doc_id,
+                top_k=top_k,
+                list_query=list_query,
+            )
+            all_candidates = _blend_hyde_candidates(all_candidates, hyde_candidates)
 
     # Drop low-confidence chunks before page ranking
     all_candidates = [c for c in all_candidates if c.get("score", 0.0) >= MIN_SCORE_THRESHOLD]
 
     ranked = _rank_by_page(all_candidates, top_k)
+    if FULL_PAGE_RAG_ENABLED:
+        ranked = _expand_to_full_pages(
+            collection=collection,
+            ranked_chunks=ranked,
+            source_type=source_type,
+            top_k=top_k,
+        )
 
     elapsed_ms = round((time.perf_counter() - trace_start) * 1000, 2)
     _trace_event(trace, "retrieve_context.done", {
@@ -554,6 +844,10 @@ def retrieve_context(
         "returned": len(ranked),
         "collection_size": collection.count(),
         "top_k": top_k,
+        "doc_id": doc_id or "",
+        "full_page_rag": FULL_PAGE_RAG_ENABLED,
+        "hyde_applied": hyde_applied,
+        "top_score": round(top_score, 4),
         "elapsed_ms": elapsed_ms,
     })
     _finish_obs_span(
@@ -563,6 +857,10 @@ def retrieve_context(
             "candidates_before_threshold": len(all_candidates),
             "collection_size": collection.count(),
             "top_k": top_k,
+            "doc_id": doc_id or "",
+            "full_page_rag": FULL_PAGE_RAG_ENABLED,
+            "hyde_applied": hyde_applied,
+            "top_score": round(top_score, 4),
             "elapsed_ms": elapsed_ms,
         },
     )

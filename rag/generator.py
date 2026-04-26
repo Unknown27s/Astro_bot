@@ -14,6 +14,51 @@ from rag.memory import query_memory, add_memory_entry
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Memory helpers — shared by both generate functions
+# ---------------------------------------------------------------------------
+
+def _check_memory(query: str, user_id: Optional[str], label: str = "") -> Optional[dict]:
+    """
+    Look up a cached response in conversation memory.
+    Returns the memory result dict on a hit, or None on a miss / disabled / error.
+    """
+    if not (CONV_ENABLED and query):
+        return None
+    try:
+        return query_memory(query, user_id=user_id)
+    except Exception as e:
+        prefix = f"[{label}] " if label else ""
+        logger.warning(f"{prefix}Memory query failed: {e}")
+        return None
+
+
+def _store_memory(
+    query: str,
+    result: str,
+    sources: list,
+    user_id: Optional[str],
+    label: str = "",
+) -> Optional[str]:
+    """
+    Persist a response to conversation memory.
+    Returns the new memory ID on success, or None on disabled / error.
+    """
+    if not (CONV_ENABLED and query and result):
+        return None
+    try:
+        entry = add_memory_entry(query=query, response=result, sources=sources, user_id=user_id)
+        return entry.get("id") if isinstance(entry, dict) else None
+    except Exception as e:
+        prefix = f"[{label}] " if label else ""
+        logger.warning(f"{prefix}Failed to store response in memory: {e}")
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Status helpers
+# ---------------------------------------------------------------------------
+
 def get_llm_status() -> dict:
     """
     Get LLM status WITHOUT triggering a generation.
@@ -25,9 +70,7 @@ def get_llm_status() -> dict:
     mode = meta.get("mode", "local_only")
     primary = meta.get("primary", "ollama")
 
-    # Report status of the primary provider
     primary_status = statuses.get(primary, {"status": "error", "message": "Unknown provider"})
-
     label = f"[{mode}] {primary_status['message']}"
     return {"status": primary_status["status"], "message": label}
 
@@ -37,6 +80,10 @@ def is_llm_available() -> bool:
     mgr = get_manager()
     return mgr.is_any_available()
 
+
+# ---------------------------------------------------------------------------
+# Main generation functions
+# ---------------------------------------------------------------------------
 
 def generate_response(
     query: str,
@@ -66,21 +113,16 @@ def generate_response(
     """
     start_time = time.time()
 
-    # Step 1: Check conversation memory if enabled
-    if CONV_ENABLED and query:
-        try:
-            memory_result = query_memory(query, user_id=user_id)
-            if memory_result:
-                elapsed = (time.time() - start_time) * 1000
-                logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
-                return {
-                    "response": memory_result["response"],
-                    "from_memory": True,
-                    "memory_id": memory_result.get("memory_id")
-                }
-        except Exception as e:
-            # Memory check failed, continue with LLM generation
-            logger.warning(f"Memory query failed: {e}")
+    # Step 1: Check conversation memory
+    memory_result = _check_memory(query, user_id)
+    if memory_result:
+        elapsed = (time.time() - start_time) * 1000
+        logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
+        return {
+            "response": memory_result["response"],
+            "from_memory": True,
+            "memory_id": memory_result.get("memory_id"),
+        }
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
@@ -104,38 +146,17 @@ def generate_response(
     gen_elapsed = (time.time() - gen_start) * 1000
     logger.info(f"LLM generation completed in {gen_elapsed:.1f}ms")
 
-    if not result:
-        # All providers failed — use fallback
+    # Step 3: Fallback if every provider failed (result is None, not just falsy)
+    if result is None:
         logger.warning("All LLM providers failed, using fallback response")
         result = _fallback_response(query, context)
 
-    # Step 3: Store in memory for future queries (if enabled)
-    if CONV_ENABLED and query and result:
-        try:
-            memory_entry = add_memory_entry(
-                query=query,
-                response=result,
-                sources=sources or [],
-                user_id=user_id
-            )
-            return {
-                "response": result,
-                "from_memory": False,
-                "memory_id": memory_entry.get("id") if isinstance(memory_entry, dict) else None
-            }
-        except Exception as e:
-            # Memory storage failed, but still return the response
-            logger.warning(f"Failed to store response in memory: {e}")
-            return {
-                "response": result,
-                "from_memory": False,
-                "memory_id": None
-            }
-
+    # Step 4: Store in memory and always return the result
+    memory_id = _store_memory(query, result, sources or [], user_id)
     return {
         "response": result,
         "from_memory": False,
-        "memory_id": None
+        "memory_id": memory_id,
     }
 
 
@@ -154,20 +175,18 @@ def generate_response_direct(
     """
     start_time = time.time()
 
-    if CONV_ENABLED and query:
-        try:
-            memory_result = query_memory(query, user_id=user_id)
-            if memory_result:
-                elapsed = (time.time() - start_time) * 1000
-                logger.info(f"Direct mode memory cache hit - returned in {elapsed:.1f}ms")
-                return {
-                    "response": memory_result["response"],
-                    "from_memory": True,
-                    "memory_id": memory_result.get("memory_id"),
-                }
-        except Exception as e:
-            logger.warning(f"Direct mode memory query failed: {e}")
+    # Step 1: Check conversation memory
+    memory_result = _check_memory(query, user_id, label="direct")
+    if memory_result:
+        elapsed = (time.time() - start_time) * 1000
+        logger.info(f"Direct mode memory cache hit - returned in {elapsed:.1f}ms")
+        return {
+            "response": memory_result["response"],
+            "from_memory": True,
+            "memory_id": memory_result.get("memory_id"),
+        }
 
+    # Step 2: Generate response
     mgr = get_manager()
     direct_prompt = (
         "Answer the user naturally and helpfully. "
@@ -182,31 +201,21 @@ def generate_response_direct(
         max_tokens=MODEL_MAX_TOKENS,
     )
 
-    if not result:
+    if result is None:
         result = "I am unable to generate a response right now. Please try again in a moment."
 
-    if CONV_ENABLED and query and result:
-        try:
-            memory_entry = add_memory_entry(
-                query=query,
-                response=result,
-                sources=[],
-                user_id=user_id,
-            )
-            return {
-                "response": result,
-                "from_memory": False,
-                "memory_id": memory_entry.get("id") if isinstance(memory_entry, dict) else None,
-            }
-        except Exception as e:
-            logger.warning(f"Failed to store direct-mode response in memory: {e}")
-
+    # Step 3: Store in memory and always return the result
+    memory_id = _store_memory(query, result, [], user_id, label="direct")
     return {
         "response": result,
         "from_memory": False,
-        "memory_id": None,
+        "memory_id": memory_id,
     }
 
+
+# ---------------------------------------------------------------------------
+# Fallback
+# ---------------------------------------------------------------------------
 
 def _fallback_response(query: str, context: str) -> str:
     """

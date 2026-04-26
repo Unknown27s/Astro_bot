@@ -61,6 +61,8 @@ RETRIEVAL_MODE = os.getenv("RETRIEVAL_MODE", "hybrid")  # dense | hybrid
 HYBRID_DENSE_WEIGHT = float(os.getenv("HYBRID_DENSE_WEIGHT", "0.7"))
 HYBRID_BM25_CANDIDATES = int(os.getenv("HYBRID_BM25_CANDIDATES", "40"))
 HYBRID_DENSE_CANDIDATES = int(os.getenv("HYBRID_DENSE_CANDIDATES", "20"))
+FULL_PAGE_RAG_ENABLED = os.getenv("FULL_PAGE_RAG_ENABLED", "true").lower() == "true"
+FULL_PAGE_MAX_CHARS_PER_PAGE = int(os.getenv("FULL_PAGE_MAX_CHARS_PER_PAGE", "4000"))
 HYDE_ENABLED = os.getenv("HYDE_ENABLED", "false").lower() == "true"
 HYDE_TRIGGER_SCORE = float(os.getenv("HYDE_TRIGGER_SCORE", "0.58"))
 HYDE_SCORE_BLEND = float(os.getenv("HYDE_SCORE_BLEND", "0.6"))

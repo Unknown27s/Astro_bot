@@ -10,6 +10,7 @@ PDF improvements:
   - Merged / empty cell handling
   - Three-strategy fallback: pdfplumber → PyMuPDF → PyPDF2
   - Encrypted PDF detection with clear user message
+  - Table extraction with metadata for structured data retrieval
 """
 
 from __future__ import annotations
@@ -500,3 +501,95 @@ def parse_document(file_path: str) -> tuple[str | None, str | None]:
 
     except Exception as exc:
         return None, f"Failed to parse {path.name}: {exc}"
+
+
+# ---------------------------------------------------------------------------
+# Table extraction for structured data retrieval
+# ---------------------------------------------------------------------------
+
+def extract_tables_with_metadata(file_path: str) -> list[dict]:
+    """
+    Extract tables from document with full metadata for retrieval.
+    
+    Returns list of dictionaries with:
+      - title: Table name/reference
+      - headers: Column headers
+      - rows: Data rows
+      - page: Page number
+      - text: Full text representation for embedding
+      - type: "regulation_table", "credit_table", etc. (auto-detected)
+    
+    Example:
+      [
+        {
+          "title": "Table 4.1: Credit Assignment",
+          "headers": ["Contact periods", "Credits"],
+          "rows": [["1 Lecture Period", "1"], ...],
+          "page": 5,
+          "text": "Contact periods | Credits \\n 1 Lecture Period | 1 \\n ...",
+          "type": "credit_assignment"
+        }
+      ]
+    """
+    try:
+        from ingestion.table_extractor import (
+            extract_tables_from_pdf,
+            detect_markdown_table,
+        )
+    except ImportError:
+        return []
+
+    path = Path(file_path)
+    
+    if path.suffix.lower() != ".pdf":
+        # For non-PDFs, try markdown table detection on extracted text
+        text, err = parse_document(file_path)
+        if err or not text:
+            return []
+        tables = detect_markdown_table(text)
+    else:
+        # For PDFs, use pdfplumber extraction
+        tables = extract_tables_from_pdf(file_path)
+
+    # Enhance tables with type classification
+    result = []
+    for table in tables:
+        table_dict = table._asdict()  # Convert NamedTuple to dict
+        
+        # Auto-detect table type from content
+        table_dict["type"] = _classify_table_type(table.title, table.headers)
+        
+        result.append(table_dict)
+
+    return result
+
+
+def _classify_table_type(title: str, headers: list[str]) -> str:
+    """
+    Classify table type based on title and headers.
+    
+    Used to prioritize table retrieval for specific queries.
+    """
+    title_lower = title.lower()
+    headers_lower = [h.lower() for h in headers]
+
+    if "credit" in title_lower:
+        return "credit_assignment"
+    if "grade" in title_lower or "grading" in title_lower:
+        return "grading_system"
+    if "attendance" in title_lower:
+        return "attendance_policy"
+    if "degree" in title_lower or "classification" in title_lower:
+        return "degree_classification"
+    if "duration" in title_lower or "semester" in title_lower:
+        return "semester_duration"
+    
+    # Check headers
+    if any("credit" in h for h in headers_lower):
+        return "credit_assignment"
+    if any("grade" in h for h in headers_lower):
+        return "grading_system"
+    if any("attendance" in h for h in headers_lower):
+        return "attendance_policy"
+    
+    return "general_table"
