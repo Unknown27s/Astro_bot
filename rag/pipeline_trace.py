@@ -135,12 +135,23 @@ class PipelineTrace:
         self.unique_sources = None
         self.from_memory = False
 
+        self.expanded_queries = []
+        self.query_expansion_checked = False
+        self.query_expansion_enabled = False
+
     def record_embedding(self, model: str, dims: int, preview: list, time_ms: float):
         """Record query embedding step."""
         self.embedding_model = model
         self.embedding_dims = dims
         self.embedding_preview = preview[:5]  # first 5 values
         self.embedding_time_ms = time_ms
+
+    def record_expansion(self, enabled: bool, expansions: list = None):
+        """Record query expansion step."""
+        self.query_expansion_checked = True
+        self.query_expansion_enabled = enabled
+        if expansions:
+            self.expanded_queries = expansions
 
     def record_memory_check(self, hit: bool, best_similarity: float = None,
                             threshold: float = None, time_ms: float = None):
@@ -231,6 +242,18 @@ class PipelineTrace:
                 lines.append(_kv("Confidence", f"{self.route_confidence:.0%}"))
             if self.route_reason:
                 lines.append(_kv("Reason", self.route_reason))
+
+        # ── Step 3b: Query Expansion ──
+        if self.query_expansion_checked:
+            lines.append(_section("Step 3b| [EXPAND]", "QUERY EXPANSION"))
+            if not self.query_expansion_enabled:
+                lines.append(_kv("Status", f"{_DIM}Disabled in config (or LLM skipped){_RESET}"))
+            elif self.expanded_queries:
+                lines.append(_kv("Status", f"{_GREEN}Enabled - Generated {len(self.expanded_queries)} variants{_RESET}"))
+                for i, eq in enumerate(self.expanded_queries, 1):
+                    lines.append(_kv(f"Variant {i}", f'"{_MAGENTA}{eq}{_RESET}"'))
+            else:
+                lines.append(_kv("Status", f"{_YELLOW}Enabled but LLM failed to generate variants{_RESET}"))
 
         # ── Step 4: Memory Check ──
         if self.memory_checked:

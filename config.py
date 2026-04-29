@@ -74,6 +74,13 @@ FAQ_COLLECTION = os.getenv("FAQ_COLLECTION", "ims_faq")
 FAQ_TOP_K = int(os.getenv("FAQ_TOP_K", "5"))
 FAQ_MIN_SCORE = float(os.getenv("FAQ_MIN_SCORE", "0.45"))
 
+# ── Query Expansion ──
+QUERY_EXPANSION_ENABLED = os.getenv("QUERY_EXPANSION_ENABLED", "false").lower() == "true"
+QUERY_EXPANSION_N = int(os.getenv("QUERY_EXPANSION_N", "3"))
+QUERY_EXPANSION_MAX_TOKENS = int(os.getenv("QUERY_EXPANSION_MAX_TOKENS", "150"))
+QUERY_EXPANSION_RRF_K = int(os.getenv("QUERY_EXPANSION_RRF_K", "60"))
+QUERY_EXPANSION_TEMPERATURE = float(os.getenv("QUERY_EXPANSION_TEMPERATURE", "0.3"))
+
 # ── Official Site Ingestion ──
 OFFICIAL_SITE_ALLOWED_DOMAINS = [
 	domain.strip().lower()

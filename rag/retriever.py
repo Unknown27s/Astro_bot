@@ -801,13 +801,19 @@ def retrieve_context(
     query_tokens = _tokenize(query_text)
     list_query = _is_list_style_query(query_text, query_tokens)
 
-    all_candidates = _retrieve_candidates_for_text(
-        collection=collection,
-        retrieval_text=query_text or query,
-        source_type=source_type,
-        doc_id=doc_id,
-        top_k=top_k,
-        list_query=list_query,
+    from rag.query_expansion import expand_and_retrieve
+
+    all_candidates = expand_and_retrieve(
+        query=query_text or query,
+        retrieve_fn=_retrieve_candidates_for_text,
+        retrieve_kwargs={
+            "collection": collection,
+            "source_type": source_type,
+            "doc_id": doc_id,
+            "top_k": top_k,
+            "list_query": list_query,
+        },
+        trace=trace
     )
 
     hyde_applied = False
