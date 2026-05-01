@@ -500,7 +500,11 @@ def api_chat(req: ChatRequest, request: Request):
 
         chunks = []
         citations = ""
-        if route.mode == "general_chat":
+        if route.mode == "timetable":
+            from rag.tools.timetable_agent import execute_timetable_agent
+            response_text = execute_timetable_agent(req.query, trace=trace)
+            gen_result = {"response": response_text, "from_memory": False}
+        elif route.mode == "general_chat":
             # Bypass retrieval for non-institutional small-talk/general questions.
             gen_result = generate_response_direct(req.query, user_id=req.user_id)
         else:
@@ -745,7 +749,11 @@ def api_chat_audio(
 
         chunks = []
         citations = ""
-        if route.mode == "general_chat":
+        if route.mode == "timetable":
+            from rag.tools.timetable_agent import execute_timetable_agent
+            response_text = execute_timetable_agent(transcribed_text, trace=trace)
+            gen_result = {"response": response_text, "from_memory": False}
+        elif route.mode == "general_chat":
             gen_result = generate_response_direct(transcribed_text, user_id=user_id)
         else:
             # Generate RAG response based on transcribed text
@@ -1109,6 +1117,73 @@ def api_upload_document(
         "chunks_indexed": stored,
         "file_size": len(content),
         "suggested_questions": suggested_questions[:6],
+    }
+
+
+@app.post("/api/documents/timetable/upload")
+@limiter.limit("10/minute")
+def api_upload_timetable(
+    request: Request,
+    class_name: str = Form(...),
+    file: UploadFile = File(...),
+    uploaded_by: Optional[str] = Form(None),
+):
+    """Upload and parse a timetable (admin/faculty only)."""
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] not in ("admin", "faculty"):
+            raise HTTPException(status_code=403, detail="Only faculty and administrators can upload timetables")
+
+    original_filename = file.filename or "timetable.csv"
+    file_ext = Path(original_filename).suffix.lower()
+    
+    if file_ext not in (".csv", ".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported for timetables")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    from ingestion.timetable_parser import parse_timetable_to_entries
+    try:
+        entries = parse_timetable_to_entries(content, file_ext, class_name)
+    except Exception as e:
+        logger.error(f"Failed to parse timetable: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse timetable: {str(e)}")
+
+    if not entries:
+        raise HTTPException(status_code=422, detail="No schedule entries found. Check your file format.")
+
+    from database.db import add_timetable_entry, clear_timetable
+    try:
+        # Clear existing timetable for this class to prevent duplicates
+        deleted = clear_timetable(class_name)
+        
+        for entry in entries:
+            add_timetable_entry(
+                class_name=entry["class_name"],
+                day=entry["day"],
+                start_time=entry["start_time"],
+                end_time=entry["end_time"],
+                subject=entry["subject"],
+                room=entry["room"],
+                uploaded_by=uploaded_by
+            )
+    except Exception as e:
+        logger.error(f"Database error saving timetable: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save timetable to database: {str(e)}")
+
+    return {
+        "status": "success",
+        "class_name": class_name,
+        "entries_saved": len(entries),
+        "deleted_old_entries": deleted,
     }
 
 
@@ -1999,6 +2074,79 @@ def api_reset_rate_limits(request: Request):
 
     logger.warning(f"Rate limits reset to default by {get_user_id(request)}")
     return {"reset": True, "message": "All rate limits have been reset to default values"}
+
+
+# ═══════════════════════════════════════════════════════
+# CUSTOM SQLITE OBSERVABILITY ENDPOINTS
+# ═══════════════════════════════════════════════════════
+
+@app.get("/api/admin/observability/traces")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_get_observability_traces(request: Request, limit: int = 50, skip: int = 0, days: int = 7):
+    """Fetch recent observability traces from SQLite."""
+    from database.db import get_traces
+
+    try:
+        traces = get_traces(limit=limit, offset=skip, days=days)
+        return {
+            "traces": traces,
+            "total": len(traces),
+            "source": "sqlite",
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch traces: {e}")
+        return {
+            "traces": [],
+            "total": 0,
+            "error": str(e),
+        }
+
+
+@app.get("/api/admin/observability/trace/{trace_id}")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_get_trace_detail(request: Request, trace_id: str):
+    """Get detailed trace info with all spans."""
+    from database.db import get_spans_for_trace, get_connection
+
+    try:
+        conn = get_connection()
+        trace_row = conn.execute(
+            "SELECT * FROM obs_traces WHERE trace_id = ?", (trace_id,)
+        ).fetchone()
+        conn.close()
+
+        if not trace_row:
+            raise HTTPException(status_code=404, detail="Trace not found")
+
+        spans = get_spans_for_trace(trace_id)
+
+        return {
+            "trace": dict(trace_row),
+            "spans": spans,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get trace detail: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/admin/observability/metrics")
+@limiter.limit(RATE_LIMIT_ADMIN_TIER)
+def api_get_observability_metrics(request: Request, days: int = 7):
+    """Get aggregate observability metrics."""
+    from database.db import get_observability_metrics
+
+    try:
+        metrics = get_observability_metrics(days=days)
+        return metrics
+    except Exception as e:
+        logger.error(f"Failed to compute metrics: {e}")
+        return {
+            "period_days": days,
+            "total_traces": 0,
+            "error": str(e),
+        }
 
 # ═══════════════════════════════════════════════════════
 # ENTRY POINT

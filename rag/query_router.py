@@ -27,6 +27,7 @@ from tests.config import ENABLE_GENERAL_CHAT_ROUTING
 class Route(StrEnum):
     OFFICIAL_SITE = "official_site"
     DOCUMENT      = "document"
+    TIMETABLE     = "timetable"
     FAQ           = "faq"
     HYBRID        = "hybrid"
     GENERAL_CHAT  = "general_chat"
@@ -96,11 +97,19 @@ _DOCUMENT = _SignalGroup(
     name="document",
     keywords=frozenset({
         "policy", "policies", "handbook", "notice", "circular",
-        "regulation", "regulations", "syllabus", "timetable",
+        "regulation", "regulations", "syllabus", 
         "exam", "attendance", "leave", "rules",
         "document", "documents", "pdf", "file", "uploaded",
         "technical", "code", "api", "config", "database",
         "rag", "chromadb", "fastapi", "spring boot",
+    }),
+)
+
+_TIMETABLE = _SignalGroup(
+    name="timetable",
+    keywords=frozenset({
+        "timetable", "schedule", "class room", "room", "present",
+        "what class", "which class", "period"
     }),
 )
 
@@ -155,15 +164,26 @@ def _resolve(
     text: str,
     official: tuple[int, list[str]],
     document: tuple[int, list[str]],
+    timetable: tuple[int, list[str]],
     faq:      tuple[int, list[str]],
     faq_specific: tuple[int, list[str]],
     general:  tuple[int, list[str]],
 ) -> QueryRoute:
     official_n, official_hits = official
     document_n, document_hits = document
+    timetable_n, timetable_hits = timetable
     faq_n,      faq_hits      = faq
     faq_specific_n, _         = faq_specific
     general_n,  general_hits  = general
+
+    # Timetable explicitly overrides other routes if it has high confidence
+    if timetable_n > 0:
+        return QueryRoute(
+            mode=Route.TIMETABLE,
+            confidence=_TIMETABLE.confidence(timetable_n),
+            reason=f"timetable/schedule signals: {', '.join(timetable_hits[:4])}",
+            source_type="database",
+        )
 
     has_institutional = bool(official_n or document_n or faq_specific_n)
 
@@ -249,6 +269,7 @@ def classify_query_route(query: str) -> QueryRoute:
         text=text,
         official=_OFFICIAL_SITE.score(text),
         document=_DOCUMENT.score(text),
+        timetable=_TIMETABLE.score(text),
         faq=_FAQ.score(text),
         faq_specific=_FAQ_SPECIFIC.score(text),
         general=_GENERAL_CHAT.score(text),

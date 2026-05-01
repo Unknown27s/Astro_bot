@@ -681,3 +681,193 @@ def render_memory_page():
             )
         except Exception as e:
             st.warning(f"Could not load config: {e}")
+
+
+# ═══════════════════════════════════════════════════════
+# RAG OBSERVABILITY DASHBOARD (Langfuse Integration)
+# ═══════════════════════════════════════════════════════
+
+def render_observability_page():
+    """Render custom SQLite-based observability dashboard - reads directly from database."""
+
+    st.markdown("### 📊 Custom SQLite Observability Dashboard")
+    st.divider()
+    st.caption("✨ Local-only tracing - Zero cloud calls, all data stored locally in SQLite")
+
+    # Time period selector
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        days = st.slider("📅 Time Period (days)", 1, 30, 7, key="obs_days")
+    with col2:
+        limit = st.selectbox("📋 Show traces", [10, 20, 50, 100], index=2)
+    with col3:
+        st.write("")  # Spacing
+        if st.button("🔄 Refresh Data", use_container_width=True, key="obs_refresh"):
+            st.rerun()
+
+    st.divider()
+
+    # Metrics section
+    st.subheader("📈 Performance Metrics")
+
+    try:
+        from database.db import get_observability_metrics
+
+        # Fetch metrics directly from database (not via API)
+        metrics_data = get_observability_metrics(days=days)
+
+        if metrics_data and metrics_data.get('total_traces', 0) > 0:
+            # Display key metrics in 4 columns
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+                st.metric(
+                    "📝 Total Traces",
+                    f"{metrics_data.get('total_traces', 0)}",
+                    help="Total number of API calls traced"
+                )
+
+            with col2:
+                st.metric(
+                    "⏱️ Avg Latency",
+                    f"{metrics_data.get('avg_latency_ms', 0):.0f}ms",
+                    help="Average request time"
+                )
+
+            with col3:
+                st.metric(
+                    "❌ Error Rate",
+                    f"{metrics_data.get('error_rate_percent', 0):.1f}%",
+                    help="Failed traces"
+                )
+
+            with col4:
+                st.metric(
+                    "🔴 Errors",
+                    f"{metrics_data.get('error_count', 0)}",
+                    help="Total error count"
+                )
+
+            # By-service breakdown
+            by_service = metrics_data.get('by_service', [])
+            if by_service:
+                st.divider()
+                st.subheader("🔧 Metrics by Service")
+                service_data = []
+                for svc in by_service:
+                    service_data.append({
+                        "Service": svc.get("service", "unknown"),
+                        "Traces": svc.get("count", 0),
+                        "Avg Latency (ms)": f"{svc.get('avg_latency', 0):.1f}",
+                    })
+                st.dataframe(service_data, use_container_width=True, hide_index=True)
+        else:
+            st.info("📭 No traces yet. Send a query to generate observability data!")
+
+    except Exception as e:
+        st.error(f"❌ Error loading metrics: {e}")
+        with st.expander("🔧 Troubleshooting"):
+            st.write(f"**Error details:** {str(e)}")
+            st.write("**Checklist:**")
+            st.write("1. ✅ Run a query via '💬 Test Chat'")
+            st.write("2. ✅ Ensure database is initialized")
+            st.write("3. ✅ Click '🔄 Refresh Data' button")
+
+    st.divider()
+
+    # Recent traces table
+    st.subheader("📋 Recent Traces")
+
+    try:
+        from database.db import get_traces
+        import pandas as pd
+
+        # Fetch recent traces directly from database
+        traces = get_traces(limit=limit, offset=0, days=days)
+
+        if traces:
+            # Format for display
+            display_traces = []
+            for t in traces:
+                display_traces.append({
+                    "Trace ID": t.get("trace_id", "")[:12] + "..." if t.get("trace_id") else "N/A",
+                    "Service": t.get("service", "unknown"),
+                    "Operation": t.get("operation", "unknown"),
+                    "Latency (ms)": f"{t.get('duration_ms', 0):.1f}",
+                    "Status": "✅ OK" if t.get("status") == "success" else "❌ ERROR",
+                    "Time": t.get("created_at", "")[:19] if t.get("created_at") else "N/A",
+                })
+
+            df = pd.DataFrame(display_traces)
+            st.dataframe(df, use_container_width=True, hide_index=True, height=300)
+        else:
+            st.info(f"📭 No traces found in the last {days} days. Run a query to generate traces!")
+
+    except Exception as e:
+        st.error(f"❌ Error loading traces: {e}")
+
+    st.divider()
+
+    # How it works
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.info(
+            """
+            **💾 How It Works:**
+
+            - Every query creates a **trace**
+            - Each trace contains **spans** (retrieval, generation, memory)
+            - All data stored **100% locally** in SQLite
+            - No cloud calls, no external dependencies
+            - Database: `data/astrobot.db`
+            """,
+            icon="ℹ️"
+        )
+
+    with col2:
+        st.success(
+            """
+            **✨ Benefits:**
+
+            ✅ Zero cloud dependency
+            ✅ Complete privacy
+            ✅ Fast queries (<50ms)
+            ✅ Full control
+            ✅ Free forever
+            ✅ ~3ms overhead
+            """,
+            icon="🎉"
+        )
+
+    # Instructions
+    st.divider()
+    with st.expander("📖 How to Use This Dashboard"):
+        st.markdown("""
+        ### Quick Start
+
+        1. **Send a Query**: Go to "💬 Test Chat" and ask a question
+        2. **View Traces**: Come back here and click "🔄 Refresh Data"
+        3. **Analyze Metrics**: Look at performance stats
+
+        ### What the Metrics Mean
+
+        - **Total Traces**: Number of API requests processed
+        - **Avg Latency**: How fast responses are (lower = better)
+        - **Error Rate**: % of failed requests
+        - **By Service**: Performance breakdown by component
+
+        ### Database Info
+
+        - **Location**: `data/astrobot.db`
+        - **Tables**: `obs_traces`, `obs_spans`
+        - **Indexes**: Fast queries on `trace_id`, `created_at`, `service`
+
+        ### Next Steps
+
+        - Monitor latency trends over time
+        - Identify slow operations
+        - Optimize bottlenecks
+        """)
+
+

@@ -76,6 +76,7 @@ FAQ_MIN_SCORE = float(os.getenv("FAQ_MIN_SCORE", "0.45"))
 
 # ── Query Expansion ──
 QUERY_EXPANSION_ENABLED = os.getenv("QUERY_EXPANSION_ENABLED", "false").lower() == "true"
+QUERY_EXPANSION_TRIGGER_SCORE = float(os.getenv("QUERY_EXPANSION_TRIGGER_SCORE", "0.50"))
 QUERY_EXPANSION_N = int(os.getenv("QUERY_EXPANSION_N", "3"))
 QUERY_EXPANSION_MAX_TOKENS = int(os.getenv("QUERY_EXPANSION_MAX_TOKENS", "150"))
 QUERY_EXPANSION_RRF_K = int(os.getenv("QUERY_EXPANSION_RRF_K", "60"))

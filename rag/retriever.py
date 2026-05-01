@@ -30,6 +30,7 @@ from typing import NamedTuple
 
 from ingestion.embedder import get_collection, generate_embeddings
 from rag.providers.manager import get_manager
+from rag.observability.trace_context import get_trace_id, get_obs_trace
 from tests.config import (
     FULL_PAGE_MAX_CHARS_PER_PAGE,
     FULL_PAGE_RAG_ENABLED,
@@ -802,19 +803,39 @@ def retrieve_context(
     list_query = _is_list_style_query(query_text, query_tokens)
 
     from rag.query_expansion import expand_and_retrieve
+    from tests.config import QUERY_EXPANSION_ENABLED, QUERY_EXPANSION_TRIGGER_SCORE
 
-    all_candidates = expand_and_retrieve(
-        query=query_text or query,
-        retrieve_fn=_retrieve_candidates_for_text,
-        retrieve_kwargs={
-            "collection": collection,
-            "source_type": source_type,
-            "doc_id": doc_id,
-            "top_k": top_k,
-            "list_query": list_query,
-        },
-        trace=trace
+    # Step 1: Retrieve with original query first
+    original_candidates = _retrieve_candidates_for_text(
+        collection=collection,
+        retrieval_text=query_text or query,
+        source_type=source_type,
+        doc_id=doc_id,
+        top_k=top_k,
+        list_query=list_query,
     )
+
+    # Step 2: Check top score to decide if expansion is needed
+    top_score = max((float(c.get("score", 0.0)) for c in original_candidates), default=0.0)
+
+    # Step 3: Apply query expansion if enabled and score is below threshold
+    if QUERY_EXPANSION_ENABLED and top_score < QUERY_EXPANSION_TRIGGER_SCORE:
+        all_candidates = expand_and_retrieve(
+            query=query_text or query,
+            retrieve_fn=_retrieve_candidates_for_text,
+            retrieve_kwargs={
+                "collection": collection,
+                "source_type": source_type,
+                "doc_id": doc_id,
+                "top_k": top_k,
+                "list_query": list_query,
+            },
+            trace=trace,
+            top_score=top_score,
+        )
+    else:
+        # Score is good or expansion disabled - use original results
+        all_candidates = original_candidates
 
     hyde_applied = False
     top_score = max((float(c.get("score", 0.0)) for c in all_candidates), default=0.0)

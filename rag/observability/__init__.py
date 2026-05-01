@@ -1,5 +1,6 @@
 """Observability utilities for tracing and analytics."""
 
-from .langfuse_client import start_observation, hash_user_identifier, record_feedback
+# Use SQLite-based tracing (replaces Langfuse)
+from .sqlite_tracer import start_observation, ObservationTrace, ObservationSpan
 
-__all__ = ["start_observation", "hash_user_identifier", "record_feedback"]
+__all__ = ["start_observation", "ObservationTrace", "ObservationSpan"]

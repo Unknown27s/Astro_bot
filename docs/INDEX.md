@@ -11,8 +11,10 @@ This index points to the current AstroBot documentation first and keeps older ph
 | [START_HERE.md](START_HERE.md) | Quick project overview and query flow | 5 min |
 | [guides/QUICKREF.md](guides/QUICKREF.md) | Commands, config, ports, and API shortcuts | 10 min |
 | [architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md) | End-to-end system overview | 20 min |
+| [architecture/RAG.md](architecture/RAG.md) | Complete RAG system: routing, retrieval, generation, expansion, memory | 25 min |
 | [architecture/QUERY_TO_VECTOR_SEARCH.md](architecture/QUERY_TO_VECTOR_SEARCH.md) | Dense, BM25, and HyDE retrieval | 15 min |
-| [development/LANGFUSE_INTEGRATION_GUIDE.md](development/LANGFUSE_INTEGRATION_GUIDE.md) | Tracing, feedback, and trace monitor | 10 min |
+| [development/SQLITE_OBSERVABILITY.md](development/SQLITE_OBSERVABILITY.md) | **✨ NEW** Custom SQLite observability (zero-cloud, local-only tracing) | 20 min |
+| [development/LANGFUSE_INTEGRATION_GUIDE.md](development/LANGFUSE_INTEGRATION_GUIDE.md) | Tracing, feedback, and trace monitor (cloud-based) | 10 min |
 | [UPLOAD_API_REFERENCE.md](UPLOAD_API_REFERENCE.md) | Upload response and suggested questions | 10 min |
 | [proposal_feature/official_site_ingestion_plan.md](proposal_feature/official_site_ingestion_plan.md) | Site crawl ingest flow and UI behavior | 10 min |
 | [Voice_to_Text_Implementation_Guide.md](Voice_to_Text_Implementation_Guide.md) | Whisper voice input | 10 min |
@@ -37,6 +39,7 @@ This index points to the current AstroBot documentation first and keeps older ph
 | Document | Purpose | Time |
 |----------|---------|------|
 | [architecture/COMPLETE_UNDERSTANDING.md](architecture/COMPLETE_UNDERSTANDING.md) | Executive summary | 20 min |
+| [architecture/RAG.md](architecture/RAG.md) | RAG system architecture & components | 25 min |
 | [architecture/DIAGRAMS.md](architecture/DIAGRAMS.md) | Flow diagrams | 15 min |
 | [architecture/DATABASE_SCHEMA.md](architecture/DATABASE_SCHEMA.md) | Database structure | 10 min |
 
@@ -69,9 +72,10 @@ This index points to the current AstroBot documentation first and keeps older ph
 5. [proposal_feature/official_site_ingestion_plan.md](proposal_feature/official_site_ingestion_plan.md)
 
 ### Retrieval and document pipeline
-1. [architecture/QUERY_TO_VECTOR_SEARCH.md](architecture/QUERY_TO_VECTOR_SEARCH.md)
-2. [UPLOAD_API_REFERENCE.md](UPLOAD_API_REFERENCE.md)
-3. [architecture/DATABASE_SCHEMA.md](architecture/DATABASE_SCHEMA.md)
+1. [architecture/RAG.md](architecture/RAG.md)
+2. [architecture/QUERY_TO_VECTOR_SEARCH.md](architecture/QUERY_TO_VECTOR_SEARCH.md)
+3. [UPLOAD_API_REFERENCE.md](UPLOAD_API_REFERENCE.md)
+4. [architecture/DATABASE_SCHEMA.md](architecture/DATABASE_SCHEMA.md)
 
 ---
 
@@ -97,6 +101,7 @@ docs/
 
 ## 🔎 Quick Links
 
+- [RAG system overview](architecture/RAG.md)
 - [Retrieval flow](architecture/QUERY_TO_VECTOR_SEARCH.md)
 - [Tracing and feedback](development/LANGFUSE_INTEGRATION_GUIDE.md)
 - [Quick commands](guides/QUICKREF.md)

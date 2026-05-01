@@ -326,6 +326,19 @@ def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
+            CREATE TABLE IF NOT EXISTS timetables (
+                id          TEXT PRIMARY KEY,
+                class_name  TEXT NOT NULL,
+                day         TEXT NOT NULL,
+                start_time  TEXT NOT NULL,
+                end_time    TEXT NOT NULL,
+                subject     TEXT NOT NULL,
+                room        TEXT NOT NULL,
+                uploaded_by TEXT,
+                uploaded_at TEXT NOT NULL,
+                FOREIGN KEY (uploaded_by) REFERENCES users(id)
+            );
+
             CREATE INDEX IF NOT EXISTS idx_conversation_memory_user
                 ON conversation_memory(user_id);
             CREATE INDEX IF NOT EXISTS idx_conversation_memory_expires
@@ -344,6 +357,55 @@ def init_db() -> None:
                 ON query_logs(user_id);
             CREATE INDEX IF NOT EXISTS idx_query_logs_created
                 ON query_logs(created_at);
+            CREATE INDEX IF NOT EXISTS idx_timetables_class
+                ON timetables(class_name);
+            CREATE INDEX IF NOT EXISTS idx_timetables_day
+                ON timetables(day);
+
+            -- ═══════════════════════════════════════════════════════════
+            -- CUSTOM OBSERVABILITY (SQLite-based tracing)
+            -- ═══════════════════════════════════════════════════════════
+
+            CREATE TABLE IF NOT EXISTS obs_traces (
+                trace_id       TEXT PRIMARY KEY,
+                service        TEXT NOT NULL,
+                operation      TEXT NOT NULL,
+                user_id        TEXT,
+                start_time     TEXT NOT NULL,
+                end_time       TEXT,
+                duration_ms    REAL,
+                status         TEXT DEFAULT 'pending',
+                error          TEXT,
+                metadata       TEXT,
+                created_at     TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS obs_spans (
+                span_id        TEXT PRIMARY KEY,
+                trace_id       TEXT NOT NULL,
+                parent_span_id TEXT,
+                service        TEXT NOT NULL,
+                operation      TEXT NOT NULL,
+                start_time     TEXT NOT NULL,
+                end_time       TEXT,
+                duration_ms    REAL,
+                status         TEXT DEFAULT 'pending',
+                input_data     TEXT,
+                output_data    TEXT,
+                error          TEXT,
+                tags           TEXT,
+                created_at     TEXT NOT NULL,
+                FOREIGN KEY (trace_id) REFERENCES obs_traces(trace_id) ON DELETE CASCADE
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_obs_traces_service
+                ON obs_traces(service);
+            CREATE INDEX IF NOT EXISTS idx_obs_traces_created
+                ON obs_traces(created_at);
+            CREATE INDEX IF NOT EXISTS idx_obs_spans_trace
+                ON obs_spans(trace_id);
+            CREATE INDEX IF NOT EXISTS idx_obs_spans_service
+                ON obs_spans(service);
         """)
 
         # Migrate older databases that predate source columns on documents
@@ -503,6 +565,53 @@ def delete_document(doc_id: str) -> dict | None:
             return None
         conn.execute("DELETE FROM documents WHERE id = ?", (doc_id,))
     return dict(row)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# TIMETABLE CRUD
+# ═══════════════════════════════════════════════════════════════════════════
+
+def add_timetable_entry(
+    class_name: str,
+    day: str,
+    start_time: str,
+    end_time: str,
+    subject: str,
+    room: str,
+    uploaded_by: str | None,
+) -> str:
+    """Record a new timetable entry."""
+    entry_id = _new_id()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO timetables "
+            "(id, class_name, day, start_time, end_time, subject, room, uploaded_by, uploaded_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?)",
+            (entry_id, class_name, day, start_time, end_time, subject, room, uploaded_by, _now()),
+        )
+    return entry_id
+
+def query_timetable(class_name: str, day: str, time_str: str = "") -> list[dict]:
+    """Query timetables based on class, day, and an approximate time."""
+    with _db() as conn:
+        if time_str:
+            rows = conn.execute(
+                "SELECT * FROM timetables WHERE class_name LIKE ? AND day LIKE ? AND (start_time LIKE ? OR end_time LIKE ?)",
+                (f"%{class_name}%", f"%{day}%", f"%{time_str}%", f"%{time_str}%")
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM timetables WHERE class_name LIKE ? AND day LIKE ?",
+                (f"%{class_name}%", f"%{day}%")
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+def clear_timetable(class_name: str) -> int:
+    """Delete all entries for a specific class."""
+    with _db() as conn:
+        cursor = conn.execute("DELETE FROM timetables WHERE class_name = ?", (class_name,))
+        return cursor.rowcount
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1185,6 +1294,172 @@ def delete_announcement(
 
         conn.execute("DELETE FROM announcements WHERE id = ?", (announcement_id,))
     return True
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CUSTOM OBSERVABILITY (SQLite-based tracing)
+# ═══════════════════════════════════════════════════════════════════════════
+
+def start_trace(trace_id: str, service: str, operation: str, user_id: str | None = None, metadata: dict | None = None) -> bool:
+    """Start a new trace (root of a distributed trace)."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                """INSERT INTO obs_traces
+                   (trace_id, service, operation, user_id, start_time, metadata, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (trace_id, service, operation, user_id, _now(),
+                 str(metadata or {}), _now())
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to start trace: {e}")
+        return False
+
+
+def end_trace(trace_id: str, status: str = "success", error: str | None = None) -> bool:
+    """End a trace and compute total duration."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                """UPDATE obs_traces
+                   SET status = ?, error = ?, end_time = ?,
+                       duration_ms = CAST((julianday(?) - julianday(start_time)) * 86400000 AS REAL)
+                   WHERE trace_id = ?""",
+                (status, error, _now(), _now(), trace_id)
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to end trace: {e}")
+        return False
+
+
+def start_span(trace_id: str, span_id: str, service: str, operation: str,
+               input_data: dict | None = None, parent_span_id: str | None = None) -> bool:
+    """Start a new span within a trace."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                """INSERT INTO obs_spans
+                   (span_id, trace_id, parent_span_id, service, operation,
+                    start_time, input_data, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (span_id, trace_id, parent_span_id, service, operation,
+                 _now(), str(input_data or {}), _now())
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to start span: {e}")
+        return False
+
+
+def end_span(span_id: str, status: str = "success", output_data: dict | None = None,
+             error: str | None = None, tags: dict | None = None) -> bool:
+    """End a span and compute duration."""
+    try:
+        with _db() as conn:
+            conn.execute(
+                """UPDATE obs_spans
+                   SET status = ?, error = ?, output_data = ?, tags = ?,
+                       end_time = ?,
+                       duration_ms = CAST((julianday(?) - julianday(start_time)) * 86400000 AS REAL)
+                   WHERE span_id = ?""",
+                (status, error, str(output_data or {}), str(tags or {}),
+                 _now(), _now(), span_id)
+            )
+        return True
+    except Exception as e:
+        logger.warning(f"Failed to end span: {e}")
+        return False
+
+
+def get_traces(limit: int = 50, offset: int = 0, days: int = 7) -> list[dict]:
+    """Get recent traces."""
+    try:
+        cutoff_time = datetime.now(timezone.utc).isoformat()
+        # Simple approximation: 1 day ≈ 86400 seconds
+        with _db() as conn:
+            rows = conn.execute(
+                """SELECT trace_id, service, operation, user_id, duration_ms,
+                          status, error, created_at
+                   FROM obs_traces
+                   WHERE created_at >= datetime('now', '-' || ? || ' days')
+                   ORDER BY created_at DESC
+                   LIMIT ? OFFSET ?""",
+                (days, limit, offset)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Failed to get traces: {e}")
+        return []
+
+
+def get_spans_for_trace(trace_id: str) -> list[dict]:
+    """Get all spans for a specific trace."""
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                """SELECT span_id, service, operation, duration_ms, status,
+                          error, start_time
+                   FROM obs_spans
+                   WHERE trace_id = ?
+                   ORDER BY start_time ASC""",
+                (trace_id,)
+            ).fetchall()
+        return [dict(r) for r in rows]
+    except Exception as e:
+        logger.warning(f"Failed to get spans: {e}")
+        return []
+
+
+def get_observability_metrics(days: int = 7) -> dict:
+    """Get aggregate observability metrics."""
+    try:
+        with _db() as conn:
+            # Total traces
+            total = conn.execute(
+                """SELECT COUNT(*) as cnt FROM obs_traces
+                   WHERE created_at >= datetime('now', '-' || ? || ' days')""",
+                (days,)
+            ).fetchone()["cnt"]
+
+            # Average latency
+            avg_latency = conn.execute(
+                """SELECT AVG(duration_ms) as avg FROM obs_traces
+                   WHERE created_at >= datetime('now', '-' || ? || ' days')
+                   AND duration_ms IS NOT NULL""",
+                (days,)
+            ).fetchone()["avg"] or 0
+
+            # Error count
+            errors = conn.execute(
+                """SELECT COUNT(*) as cnt FROM obs_traces
+                   WHERE created_at >= datetime('now', '-' || ? || ' days')
+                   AND status = 'error'""",
+                (days,)
+            ).fetchone()["cnt"]
+
+            # By service
+            by_service = conn.execute(
+                """SELECT service, COUNT(*) as count, AVG(duration_ms) as avg_latency
+                   FROM obs_traces
+                   WHERE created_at >= datetime('now', '-' || ? || ' days')
+                   GROUP BY service
+                   ORDER BY count DESC""",
+                (days,)
+            ).fetchall()
+
+        return {
+            "period_days": days,
+            "total_traces": total,
+            "avg_latency_ms": round(avg_latency, 2),
+            "error_count": errors,
+            "error_rate_percent": round((errors / total * 100) if total > 0 else 0, 2),
+            "by_service": [dict(r) for r in by_service]
+        }
+    except Exception as e:
+        logger.warning(f"Failed to compute metrics: {e}")
+        return {}
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 
 _DEFAULTS = {
     "QUERY_EXPANSION_ENABLED": False,
+    "QUERY_EXPANSION_TRIGGER_SCORE": 0.50,
     "QUERY_EXPANSION_N": 3,
     "QUERY_EXPANSION_MAX_TOKENS": 150,
     "QUERY_EXPANSION_RRF_K": 60,
@@ -192,6 +193,7 @@ def expand_and_retrieve(
     retrieve_fn,          # callable: (text, **kwargs) -> list[dict]
     retrieve_kwargs: dict,
     trace=None,
+    top_score: float | None = None,
 ) -> list[dict]:
     """
     Generate expansions, retrieve candidates for each (including the
@@ -203,16 +205,31 @@ def expand_and_retrieve(
         retrieve_kwargs: Keyword arguments forwarded to retrieve_fn
                          (collection, source_type, doc_id, top_k, list_query).
         trace:           Optional PipelineTrace for terminal output.
+        top_score:       Optional top retrieval score from original query.
+                         If provided and >= QUERY_EXPANSION_TRIGGER_SCORE,
+                         expansion is skipped (score is good enough).
 
     Returns:
         RRF-merged candidate list, sorted by rrf_score descending.
         Falls back to the original query's candidates if expansion fails.
+        If score is good enough, returns original candidates without expansion.
     """
     is_enabled = _cfg("QUERY_EXPANSION_ENABLED")
+    trigger_score = float(_cfg("QUERY_EXPANSION_TRIGGER_SCORE"))
+
+    # Skip expansion if score is already good enough
+    if top_score is not None and top_score >= trigger_score:
+        if trace and hasattr(trace, 'record_expansion'):
+            trace.record_expansion(enabled=False, expansions=[], reason="score_good")
+        # Return original query's candidates (caller should pass them)
+        return retrieve_fn(retrieval_text=query, **retrieve_kwargs)
+
+    # Proceed with expansion if enabled
     expansions = expand_query(query) if is_enabled else []
-    
+
     if trace and hasattr(trace, 'record_expansion'):
-        trace.record_expansion(enabled=is_enabled, expansions=expansions)
+        reason = "score_low" if top_score is not None else "no_score"
+        trace.record_expansion(enabled=is_enabled, expansions=expansions, reason=reason)
 
     # Always include the original query
     texts = [query] + expansions

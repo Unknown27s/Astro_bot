@@ -159,6 +159,18 @@ RAG_Astrobot/
 
 ---
 
+## 📚 Documentation
+
+### Complete System Documentation
+See **[docs/INDEX.md](docs/INDEX.md)** for the full documentation index.
+
+### Key Guides
+- **[RAG System](docs/architecture/RAG.md)** — Complete guide to query routing, retrieval, generation, conversation memory
+- **[Quick Reference](docs/guides/QUICKREF.md)** — Commands, config, ports, API shortcuts
+- **[Complete Understanding](docs/architecture/COMPLETE_UNDERSTANDING.md)** — End-to-end system architecture
+
+---
+
 ## 🚀 Quick Start (5 Minutes)
 
 ### Prerequisites

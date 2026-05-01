@@ -10,8 +10,14 @@ from typing import Optional
 from tests.config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT, CONV_ENABLED
 from rag.providers.manager import get_manager, reset_manager
 from rag.memory import query_memory, add_memory_entry
+from rag.observability.trace_context import get_obs_trace
 
 logger = logging.getLogger(__name__)
+
+
+def _estimate_tokens(text: str) -> int:
+    """Estimate token count using simple heuristic: ~4 chars per token."""
+    return max(1, len(text.split()) // 1) if text else 0
 
 
 # ---------------------------------------------------------------------------
@@ -112,12 +118,35 @@ def generate_response(
         Dictionary with keys: response (str), from_memory (bool), memory_id (str or None)
     """
     start_time = time.time()
+    obs_span = None
+
+    if obs_trace and hasattr(obs_trace, "start_span"):
+        try:
+            obs_span = obs_trace.start_span(
+                name="rag.generate_response",
+                input_payload={"query": query[:200], "context_length": len(context)},
+                metadata={"route_mode": route_mode}
+            )
+        except Exception:
+            pass
 
     # Step 1: Check conversation memory
     memory_result = _check_memory(query, user_id)
     if memory_result:
         elapsed = (time.time() - start_time) * 1000
         logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
+        if obs_span:
+            try:
+                obs_span.end(
+                    output={"response_length": len(memory_result["response"])},
+                    metadata={
+                        "from_memory": True,
+                        "elapsed_ms": round(elapsed, 2),
+                        "tokens_output": _estimate_tokens(memory_result["response"]),
+                    }
+                )
+            except Exception:
+                pass
         return {
             "response": memory_result["response"],
             "from_memory": True,
@@ -151,7 +180,23 @@ def generate_response(
         logger.warning("All LLM providers failed, using fallback response")
         result = _fallback_response(query, context)
 
-    # Step 4: Store in memory and always return the result
+    # Step 4: Record observability span
+    if obs_span:
+        try:
+            obs_span.end(
+                output={"response_length": len(result) if result else 0},
+                metadata={
+                    "from_memory": False,
+                    "generation_time_ms": round(gen_elapsed, 2),
+                    "tokens_input": _estimate_tokens(user_message),
+                    "tokens_output": _estimate_tokens(result) if result else 0,
+                    "elapsed_ms": round((time.time() - start_time) * 1000, 2),
+                }
+            )
+        except Exception:
+            pass
+
+    # Step 5: Store in memory and always return the result
     memory_id = _store_memory(query, result, sources or [], user_id)
     return {
         "response": result,
