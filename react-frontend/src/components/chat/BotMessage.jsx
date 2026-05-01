@@ -16,7 +16,7 @@ const ROUTE_LABELS = {
   unclear: 'Auto',
 };
 
-export default function BotMessage({ content, sources = [], citations = '', timestamp, traceId = null, routeMode = '', onFeedback = null }) {
+export default function BotMessage({ content, sources = [], citations = '', timestamp, traceId = null, routeMode = '', onFeedback = null, isStreaming = false }) {
   const [copied, setCopied] = useState(false);
   const [feedback, setFeedback] = useState(null);
 
@@ -65,9 +65,12 @@ export default function BotMessage({ content, sources = [], citations = '', time
         </div>
 
         {/* Main Message */}
-        <div className="astro-glass-heavy max-w-3xl rounded-2xl rounded-tl-sm border border-white p-4 text-slate-50 md:p-5">
-          <div className="prose prose-sm max-w-none prose-headings:text-cyan-100 prose-strong:text-white prose-p:text-slate-50 prose-a:text-cyan-200 prose-code:text-cyan-100 prose-th:text-cyan-100 prose-td:text-slate-100 prose-table:border-collapse prose-table:border prose-table:border-white/20 prose-td:border prose-td:border-white/10 prose-th:border prose-th:border-white/20 prose-th:bg-cyan-900/30">
+        <div className="astro-glass-heavy max-w-3xl rounded-2xl rounded-tl-sm border border-white/20 p-4 text-slate-50 md:p-5 shadow-lg">
+          <div className="prose prose-sm md:prose-base prose-invert max-w-none prose-headings:text-cyan-100 prose-headings:font-bold prose-p:text-slate-200 prose-p:leading-relaxed prose-a:text-cyan-300 hover:prose-a:text-cyan-100 prose-a:transition-colors prose-a:decoration-cyan-500/30 hover:prose-a:decoration-cyan-400 prose-strong:text-white prose-strong:font-semibold prose-code:text-cyan-200 prose-code:bg-cyan-950/40 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:before:content-none prose-code:after:content-none prose-pre:bg-[#0f172a] prose-pre:border prose-pre:border-white/10 prose-pre:shadow-inner prose-blockquote:border-l-cyan-500 prose-blockquote:bg-cyan-950/20 prose-blockquote:px-4 prose-blockquote:py-1 prose-blockquote:rounded-r-lg prose-blockquote:text-slate-300 prose-blockquote:not-italic prose-li:marker:text-cyan-500 prose-ul:my-2 prose-ol:my-2 prose-table:border-collapse prose-table:w-full prose-table:overflow-hidden prose-table:rounded-lg prose-th:bg-cyan-900/40 prose-th:text-cyan-100 prose-th:font-semibold prose-th:p-3 prose-th:border prose-th:border-white/10 prose-td:p-3 prose-td:border prose-td:border-white/5 prose-td:text-slate-300 prose-tr:border-b prose-tr:border-white/5 even:prose-tr:bg-white/[0.02] hover:prose-tr:bg-white/[0.04] prose-tr:transition-colors">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            {isStreaming && (
+              <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-cyan-400 ml-0.5 align-middle" />
+            )}
           </div>
         </div>
 

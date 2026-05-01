@@ -12,6 +12,7 @@ IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institu
 
 ### For Students & Faculty
 - 💬 **Smart Q&A** — Ask natural language questions about institutional documents
+- ⚡ **Real-time Streaming** — Responses are delivered token-by-token via SSE for zero perceived latency
 - 🎙️ **Voice-to-Text** — Ask questions via microphone (powered by OpenAI Whisper)
 - 📚 **Source Citations** — Every response includes exact document references
 - ⚡ **Fast Search** — Semantic vector search via ChromaDB (sub-second retrieval)
@@ -62,10 +63,10 @@ IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institu
 
 1. **User asks question (Text or Voice)** → React → Spring Boot (8080) → FastAPI (8000)
    *If voice, FastAPI uses local Whisper to transcribe the audio into text first.*
-2. **FastAPI embeds query text** using `all-MiniLM-L6-v2` model
+2. **FastAPI classifies query** (Public Site vs Document vs Hybrid)
 3. **ChromaDB retrieves** top-5 relevant document chunks via vector similarity
-4. **Ollama generates** answer with retrieved context (local or cloud: Groq/Gemini)
-5. **Response sent back** → Spring Boot → React with sources
+4. **Ollama/Cloud LLM generates** answer tokens
+5. **Streaming Response** → Spring Boot (SSE Proxy) → React (Real-time Markdown rendering)
 
 ---
 

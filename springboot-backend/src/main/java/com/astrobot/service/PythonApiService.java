@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.BodyInserters;
 import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
 
 import java.util.List;
 import java.util.Map;
@@ -83,6 +84,21 @@ public class PythonApiService {
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
                 })
                 .block();
+    }
+
+    /**
+     * Stream a chat response from the Python FastAPI backend via SSE.
+     * Returns a Flux of SSE data payloads (the JSON inside each "data:" line).
+     * Spring WebClient auto-parses SSE events; Spring MVC re-wraps them for the browser.
+     */
+    public Flux<String> chatStream(String query, String userId, String username) {
+        return client.post()
+                .uri("/api/chat/stream")
+                .contentType(MediaType.APPLICATION_JSON)
+                .accept(MediaType.TEXT_EVENT_STREAM)
+                .bodyValue(Map.of("query", query, "user_id", userId, "username", username))
+                .retrieve()
+                .bodyToFlux(String.class);
     }
 
     // ── Announcements ──

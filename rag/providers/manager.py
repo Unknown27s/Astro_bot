@@ -112,6 +112,29 @@ class ProviderManager:
             print(f"[ProviderManager] All providers failed. Last error: {last_error}")
         return None
 
+    def generate_stream(self, system_prompt: str, user_message: str,
+                        temperature: float, max_tokens: int):
+        """
+        Try each provider in the chain until one succeeds in streaming.
+        Yields chunks from the successful provider.
+        """
+        chain = self._get_chain()
+        last_error = None
+        for provider in chain:
+            try:
+                # Try to get the first chunk to ensure the provider works
+                stream = provider.generate_stream(system_prompt, user_message, temperature, max_tokens)
+                # Since we can't easily check if the stream is valid without consuming it,
+                # we just yield from it. If the connection fails, it will throw before yielding.
+                yield from stream
+                return  # If we successfully streamed, stop trying other providers
+            except Exception as e:
+                last_error = e
+                print(f"[ProviderManager] {provider.name} streaming failed: {e}")
+                continue
+        if last_error:
+            print(f"[ProviderManager] All providers failed streaming. Last error: {last_error}")
+
     def is_any_available(self) -> bool:
         """Return True if at least one provider in the chain is available."""
         chain = self._get_chain()

@@ -38,6 +38,34 @@ class OllamaProvider(LLMProvider):
         data = resp.json()
         return data.get("message", {}).get("content", "").strip()
 
+    def generate_stream(self, system_prompt: str, user_message: str,
+                        temperature: float, max_tokens: int):
+        import json
+        url = f"{self._base_url}/api/chat"
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "stream": True,
+            "options": {
+                "temperature": temperature,
+                "num_predict": max_tokens,
+            },
+        }
+        with requests.post(url, json=payload, stream=True, timeout=120) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    try:
+                        data = json.loads(line.decode('utf-8'))
+                        chunk = data.get("message", {}).get("content", "")
+                        if chunk:
+                            yield chunk
+                    except json.JSONDecodeError:
+                        continue
+
     def is_available(self) -> bool:
         try:
             resp = requests.get(f"{self._base_url}/api/tags", timeout=3)

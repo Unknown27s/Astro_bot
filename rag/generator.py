@@ -205,6 +205,77 @@ def generate_response(
     }
 
 
+def generate_response_stream(
+    query: str,
+    context: str,
+    user_id: Optional[str] = None,
+    sources: Optional[list] = None,
+    trace=None,
+    obs_trace=None,
+    route_mode: Optional[str] = None,
+    **kwargs,
+):
+    """
+    Generate a response stream using the configured LLM provider(s) with retrieved context.
+    Yields dicts with chunk data.
+    """
+    start_time = time.time()
+
+    # Step 1: Check conversation memory
+    memory_result = _check_memory(query, user_id)
+    if memory_result:
+        yield {
+            "chunk": memory_result["response"],
+            "from_memory": True,
+            "memory_id": memory_result.get("memory_id"),
+            "done": True,
+        }
+        return
+
+    # Step 2: Generate response via LLM provider
+    mgr = get_manager()
+
+    user_message = (
+        "Based on the following institutional documents, answer the question accurately.\n\n"
+        f"CONTEXT:\n{context}\n\n"
+        f"QUESTION: {query}"
+    )
+
+    full_response = ""
+    stream = mgr.generate_stream(
+        system_prompt=SYSTEM_PROMPT,
+        user_message=user_message,
+        temperature=MODEL_TEMPERATURE,
+        max_tokens=MODEL_MAX_TOKENS,
+    )
+
+    if stream is None:
+        logger.warning("All LLM providers failed streaming, using fallback response")
+        full_response = _fallback_response(query, context)
+        yield {
+            "chunk": full_response,
+            "from_memory": False,
+            "done": True,
+        }
+    else:
+        for chunk in stream:
+            full_response += chunk
+            yield {
+                "chunk": chunk,
+                "from_memory": False,
+                "done": False,
+            }
+        
+        memory_id = _store_memory(query, full_response, sources or [], user_id)
+        yield {
+            "chunk": "",
+            "from_memory": False,
+            "memory_id": memory_id,
+            "done": True,
+        }
+
+
+
 def generate_response_direct(
     query: str,
     user_id: Optional[str] = None,
@@ -256,6 +327,71 @@ def generate_response_direct(
         "from_memory": False,
         "memory_id": memory_id,
     }
+
+
+def generate_response_direct_stream(
+    query: str,
+    user_id: Optional[str] = None,
+    trace=None,
+    obs_trace=None,
+    route_mode: Optional[str] = None,
+    **kwargs,
+):
+    """
+    Generate a direct LLM response stream without retrieval context.
+    """
+    start_time = time.time()
+
+    # Step 1: Check conversation memory
+    memory_result = _check_memory(query, user_id, label="direct")
+    if memory_result:
+        yield {
+            "chunk": memory_result["response"],
+            "from_memory": True,
+            "memory_id": memory_result.get("memory_id"),
+            "done": True,
+        }
+        return
+
+    # Step 2: Generate response
+    mgr = get_manager()
+    direct_prompt = (
+        "Answer the user naturally and helpfully. "
+        "If the question is about IMS/RIT institution details, mention that official documents may provide the most accurate answer.\n\n"
+        f"USER QUESTION: {query}"
+    )
+
+    full_response = ""
+    stream = mgr.generate_stream(
+        system_prompt=SYSTEM_PROMPT,
+        user_message=direct_prompt,
+        temperature=MODEL_TEMPERATURE,
+        max_tokens=MODEL_MAX_TOKENS,
+    )
+
+    if stream is None:
+        full_response = "I am unable to generate a response right now. Please try again in a moment."
+        yield {
+            "chunk": full_response,
+            "from_memory": False,
+            "done": True,
+        }
+    else:
+        for chunk in stream:
+            full_response += chunk
+            yield {
+                "chunk": chunk,
+                "from_memory": False,
+                "done": False,
+            }
+
+        memory_id = _store_memory(query, full_response, [], user_id, label="direct")
+        yield {
+            "chunk": "",
+            "from_memory": False,
+            "memory_id": memory_id,
+            "done": True,
+        }
 
 
 # ---------------------------------------------------------------------------

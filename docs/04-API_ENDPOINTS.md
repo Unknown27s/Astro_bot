@@ -484,6 +484,43 @@ curl http://localhost:8000/api/documents | jq
 
 ---
 
+### Send Chat Query (Streaming)
+
+**Endpoint:** `POST /api/chat/stream`
+
+**Access:** All authenticated users
+
+**Content-Type:** `application/json`
+
+**Accept:** `text/event-stream`
+
+**Routing behavior:** Identical to the standard chat endpoint, but responses are delivered token-by-token via Server-Sent Events (SSE). The Spring Boot backend acts as a reactive proxy, relaying each chunk from the Python FastAPI engine to the frontend.
+
+**Request:**
+```json
+{
+  "query": "What are the rules for exam attendance?",
+  "user_id": "user-123",
+  "username": "jdoe"
+}
+```
+
+**SSE Format:**
+The endpoint yields multiple `data:` lines. Each line is a JSON string:
+
+```text
+data:{"chunk": "The", "from_memory": false}
+data:{"chunk": " exam", "from_memory": false}
+...
+data:{"done": true, "citations": "...", "sources": [...], "route_mode": "document"}
+```
+
+**Key Advantages:**
+- **Lower Perceived Latency:** Users see the response start immediately rather than waiting for the entire generation.
+- **Reactive Relay:** Spring Boot handles the stream without blocking its main execution threads.
+
+---
+
 ## Announcements
 
 > **Role Access:** `GET` is public (all authenticated users). Posting is via the `/api/chat` endpoint with the `@Announcement` prefix — Admin and Faculty roles only.

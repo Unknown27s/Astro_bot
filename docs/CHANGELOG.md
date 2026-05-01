@@ -4,6 +4,35 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.11] - 2026-05-01
+
+### ✨ New Features
+
+#### High-Performance SSE Streaming Architecture
+- **Real-time Token Delivery**: Implemented token-by-token streaming from Python LLM providers to the React UI.
+- **Spring Boot Reactive Proxy**:
+  - **`ChatController.java`**: Added `/api/chat/stream` SSE endpoint using `SseEmitter`.
+  - **`PythonApiService.java`**: Implemented `chatStream` using WebClient's `bodyToFlux(String.class)` to relay tokens without buffering.
+  - **Non-blocking Execution**: Dedicated thread pool for streaming to prevent Tomcat thread exhaustion.
+- **Robust Frontend Streaming Parser**:
+  - **`api.js`**: Re-engineered SSE parser to handle varying `data:` formats (with/without space).
+  - **Streaming UI**: Real-time markdown rendering with a pulse animation cursor.
+
+### 🔧 Improvements
+
+#### SSE Proxy Logic
+- Removed double JSON encoding in the Java layer to prevent string escaping issues.
+- Added 5-minute timeouts for long-running LLM generation streams.
+- Improved error handling and stream completion signaling.
+
+### 📚 Documentation
+
+#### Updated
+- **`docs/04-API_ENDPOINTS.md`**: Added comprehensive documentation for the `/api/chat/stream` endpoint.
+- **`README.md`**: Updated feature list with SSE streaming support.
+
+---
+
 ## [2.3.10] - 2026-05-01
 
 ### ✨ New Features

@@ -40,6 +40,40 @@ class GroqProvider(LLMProvider):
         data = resp.json()
         return data["choices"][0]["message"]["content"].strip()
 
+    def generate_stream(self, system_prompt: str, user_message: str,
+                        temperature: float, max_tokens: int):
+        import json
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "model": self._model,
+            "messages": [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message},
+            ],
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
+        with requests.post(_GROQ_API_URL, json=payload, headers=headers, stream=True, timeout=60) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        data_text = line_text[6:]
+                        if data_text.strip() == "[DONE]":
+                            break
+                        try:
+                            data = json.loads(data_text)
+                            chunk = data.get("choices", [{}])[0].get("delta", {}).get("content", "")
+                            if chunk:
+                                yield chunk
+                        except json.JSONDecodeError:
+                            continue
+
     def is_available(self) -> bool:
         return bool(self._api_key) and self._test_connection()
 

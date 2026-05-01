@@ -8,7 +8,7 @@ import ChatInputArea from './ChatInputArea';
 import TypingIndicator from './TypingIndicator';
 import ChatSidebar from './ChatSidebar';
 import { useAuth } from '../../context/AuthContext';
-import { sendChat, sendAudioMessage, getAnnouncements, getSuggestions, submitFeedback } from '../../services/api';
+import { sendChat, streamChat, sendAudioMessage, getAnnouncements, getSuggestions, submitFeedback } from '../../services/api';
 import chatbotLogo from '../../assets/astrobot-logo.svg';
 
 const CHATBOT_LOGO_URL = '/astrobot-logo.png';
@@ -80,6 +80,7 @@ export default function ChatLayout() {
   const mediaStreamRef = useRef(null);
   const audioChunksRef = useRef([]);
   const suggestionsRequestIdRef = useRef(0);
+  const streamControllerRef = useRef(null);
 
   const currentUser = useMemo(() => {
     try {
@@ -134,6 +135,9 @@ export default function ChatLayout() {
       }
       if (mediaStreamRef.current) {
         mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+      }
+      if (streamControllerRef.current) {
+        streamControllerRef.current.abort();
       }
     };
   }, []);
@@ -234,6 +238,12 @@ export default function ChatLayout() {
     setInputText('');
     setLiveSuggestions([]);
 
+    // Abort any previous stream
+    if (streamControllerRef.current) {
+      streamControllerRef.current.abort();
+      streamControllerRef.current = null;
+    }
+
     // Add user message
     const userMsg = {
       id: buildId(),
@@ -242,52 +252,94 @@ export default function ChatLayout() {
       timestamp: new Date().toISOString(),
     };
 
-    setMessages((prev) => [...prev, userMsg]);
+    // Create a placeholder bot message for streaming
+    const botMsgId = buildId();
+    const botMsgPlaceholder = {
+      id: botMsgId,
+      type: 'bot',
+      content: '',
+      sources: [],
+      citations: '',
+      routeMode: '',
+      traceId: null,
+      timestamp: new Date().toISOString(),
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, userMsg, botMsgPlaceholder]);
     setLoading(true);
 
-    try {
-      const response = await sendChat(messageText, currentUser.id, currentUser.username);
+    const controller = streamChat(
+      messageText,
+      currentUser.id,
+      currentUser.username,
+      {
+        onChunk: (chunk) => {
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === botMsgId
+                ? { ...msg, content: msg.content + chunk }
+                : msg
+            )
+          );
+        },
+        onDone: async (finalData) => {
+          // Update the bot message with final metadata
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === botMsgId
+                ? {
+                    ...msg,
+                    sources: finalData.sources || [],
+                    citations: finalData.citations || '',
+                    routeMode: finalData.route_mode || '',
+                    isStreaming: false,
+                  }
+                : msg
+            )
+          );
+          setLoading(false);
+          streamControllerRef.current = null;
 
-      // Add bot response
-      const botMsg = {
-        id: buildId(),
-        type: 'bot',
-        content: response.data.response,
-        sources: response.data.sources || [],
-        citations: response.data.citations || '',
-        routeMode: response.data.route_mode || '',
-        traceId: response.data.trace_id || null,
-        timestamp: new Date().toISOString(),
-      };
+          // Get the final bot message for conversation saving
+          setMessages((prev) => {
+            const finalBotMsg = prev.find((m) => m.id === botMsgId);
+            if (finalBotMsg) {
+              saveConversationTurn(userMsg, finalBotMsg, messageText);
+            }
+            return prev;
+          });
 
-      setMessages((prev) => [...prev, botMsg]);
-      saveConversationTurn(userMsg, botMsg, messageText);
-
-      // Refresh announcement feed when a new announcement is posted via chat command.
-      if (messageText.trim().toLowerCase().startsWith('@announcement')) {
-        try {
-          const result = await getAnnouncements(20);
-          setAnnouncements(Array.isArray(result.data) ? result.data : []);
-        } catch {
-          // Ignore announcement refresh errors and keep chat flow uninterrupted.
-        }
+          // Refresh announcement feed when a new announcement is posted via chat command.
+          if (messageText.trim().toLowerCase().startsWith('@announcement')) {
+            try {
+              const result = await getAnnouncements(20);
+              setAnnouncements(Array.isArray(result.data) ? result.data : []);
+            } catch {
+              // Ignore announcement refresh errors.
+            }
+          }
+        },
+        onError: (err) => {
+          console.error('Stream error:', err);
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === botMsgId
+                ? {
+                    ...msg,
+                    content: msg.content || 'Sorry, I encountered an error processing your request. Please try again.',
+                    isStreaming: false,
+                  }
+                : msg
+            )
+          );
+          setLoading(false);
+          streamControllerRef.current = null;
+        },
       }
-    } catch (error) {
-      console.error('Error sending message:', error);
+    );
 
-      // Add error message
-      const errorMsg = {
-        id: buildId(),
-        type: 'bot',
-        content: 'Sorry, I encountered an error processing your request. Please try again.',
-        sources: [],
-        timestamp: new Date().toISOString(),
-      };
-
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setLoading(false);
-    }
+    streamControllerRef.current = controller;
   };
 
   const handleRecordVoice = async () => {
@@ -603,6 +655,7 @@ export default function ChatLayout() {
                             timestamp={msg.timestamp}
                             userId={currentUser.id}
                             onFeedback={handleBotFeedback}
+                            isStreaming={msg.isStreaming}
                           />
                         ) : (
                           <UserMessage

@@ -27,6 +27,81 @@ export const register = (username, password, role, fullName) =>
 export const sendChat = (query, userId, username) =>
   api.post('/chat', { query, userId, user_id: userId, username });
 
+/**
+ * Stream a chat response via SSE from /api/chat/stream.
+ * @param {string} query - The user query.
+ * @param {string} userId - User ID.
+ * @param {string} username - Username.
+ * @param {object} callbacks - { onChunk(text), onDone(finalData), onError(err) }
+ * @returns {AbortController} - Call .abort() to cancel the stream.
+ */
+export const streamChat = (query, userId, username, { onChunk, onDone, onError }) => {
+  const controller = new AbortController();
+
+  fetch('/api/chat/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ query, user_id: userId, username }),
+    signal: controller.signal,
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop(); // keep incomplete line in buffer
+
+        for (const line of lines) {
+          const trimmedLine = line.trim();
+          if (!trimmedLine) continue;
+
+          if (trimmedLine.startsWith('data:')) {
+            try {
+              // Extract JSON content, handling both 'data: ' and 'data:'
+              const jsonStr = trimmedLine.startsWith('data: ') 
+                ? trimmedLine.slice(6) 
+                : trimmedLine.slice(5);
+              
+              if (!jsonStr) continue;
+              
+              const data = JSON.parse(jsonStr);
+              if (data.error) {
+                onError?.(new Error(data.error));
+                return;
+              }
+              if (data.done) {
+                onDone?.(data);
+                return;
+              }
+              if (data.chunk) {
+                onChunk?.(data.chunk);
+              }
+            } catch (e) {
+              // ignore JSON parse errors for partial or malformed data
+              console.warn('Failed to parse SSE data:', trimmedLine, e);
+            }
+          }
+        }
+      }
+    })
+    .catch((err) => {
+      if (err.name !== 'AbortError') {
+        onError?.(err);
+      }
+    });
+
+  return controller;
+};
+
 export const sendAudioMessage = (audioBlob, userId, username) => {
   const formData = new FormData();
   formData.append('audio', audioBlob, 'audio.webm');

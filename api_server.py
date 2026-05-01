@@ -728,6 +728,167 @@ def api_chat(req: ChatRequest, request: Request):
         raise
 
 
+@app.post("/api/chat/stream")
+@limiter.limit("5/minute")
+async def api_chat_stream(req: ChatRequest, request: Request):
+    """Send a query through the RAG pipeline and get a streaming response via SSE."""
+    from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
+    from rag.faq_retriever import retrieve_faq_context
+    from rag.generator import generate_response_stream, generate_response_direct_stream
+    from rag.pipeline_trace import PipelineTrace
+    from rag.conversation_history import add_turn
+    from fastapi.responses import StreamingResponse
+    import json
+    import asyncio
+
+    start_time = time.time()
+    route = _route_query(req.query)
+    
+    obs_trace = start_observation(
+        name="api.chat.stream",
+        user_id=req.user_id,
+        input_payload={"query_preview": req.query[:200], "username": req.username},
+        metadata={"endpoint": "/api/chat/stream", "voice": False, "route_mode": route.mode},
+    )
+
+    async def event_stream():
+        try:
+            # --- Announcement Feature Intercept ---
+            if req.query.strip().lower().startswith("@announcement"):
+                from database.db import get_connection
+                conn = get_connection()
+                user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
+                conn.close()
+
+                if not user_row or user_row['role'] not in ('admin', 'faculty'):
+                    yield f"data: {json.dumps({'error': 'Only faculty and admins can post announcements'})}\n\n"
+                    return
+
+                from rag.providers.manager import get_manager
+                from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
+
+                raw_text = req.query[13:].strip()
+                announcement_prompt = (
+                    "You are an institutional announcer. Please format the following raw text "
+                    "into a professional, clear, and engaging announcement with suitable emojis. "
+                    "Do not add conversational filler, just output the announcement text.\n\n"
+                    f"Raw text: {raw_text}"
+                )
+
+                mgr = get_manager()
+                stream = mgr.generate_stream(
+                    system_prompt=SYSTEM_PROMPT,
+                    user_message=announcement_prompt,
+                    temperature=MODEL_TEMPERATURE,
+                    max_tokens=MODEL_MAX_TOKENS,
+                )
+                
+                full_text = "✅ Announcement generated and posted successfully!\n\n---\n\n"
+                yield f"data: {json.dumps({'chunk': full_text})}\n\n"
+                
+                generated_announcement = ""
+                if stream:
+                    for chunk in stream:
+                        generated_announcement += chunk
+                        yield f"data: {json.dumps({'chunk': chunk})}\n\n"
+                        await asyncio.sleep(0.01)
+                else:
+                    generated_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
+                    yield f"data: {json.dumps({'chunk': generated_announcement})}\n\n"
+
+                create_announcement(req.user_id, req.username, generated_announcement)
+                yield f"data: {json.dumps({'done': True})}\n\n"
+                return
+
+            trace = PipelineTrace(query=req.query, username=req.username)
+            trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
+
+            chunks = []
+            citations = ""
+            
+            if route.mode == "timetable":
+                from rag.tools.timetable_agent import execute_timetable_agent
+                response_text = execute_timetable_agent(req.query, trace=trace)
+                yield f"data: {json.dumps({'chunk': response_text, 'done': False})}\n\n"
+                yield f"data: {json.dumps({'done': True, 'citations': '', 'sources': []})}\n\n"
+                return
+
+            elif route.mode == "general_chat":
+                gen_stream = generate_response_direct_stream(req.query, user_id=req.user_id)
+            else:
+                search_query = _search_query_with_history(req.user_id, req.query)
+                if route.mode == "faq":
+                    chunks = retrieve_faq_context(req.query)
+                    if not chunks:
+                        chunks = retrieve_context(
+                            search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type, 
+                            filters=route.filters, complexity_score=route.complexity_score
+                        )
+                else:
+                    chunks = retrieve_context(
+                        search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type,
+                        filters=route.filters, complexity_score=route.complexity_score
+                    )
+
+                context = format_context_for_llm(chunks)
+                gen_stream = generate_response_stream(
+                    req.query,
+                    context,
+                    user_id=req.user_id,
+                    sources=[c.get("source", "") for c in chunks],
+                    trace=trace,
+                    obs_trace=obs_trace,
+                    route_mode=route.memory_scope,
+                )
+                citations = get_source_citations(chunks)
+
+            full_response = ""
+            from_memory = False
+            for item in gen_stream:
+                if item.get("chunk"):
+                    chunk_text = item["chunk"]
+                    full_response += chunk_text
+                    yield f"data: {json.dumps({'chunk': chunk_text, 'from_memory': item.get('from_memory', False)})}\n\n"
+                    await asyncio.sleep(0.005)
+                
+                if item.get("done"):
+                    from_memory = item.get("from_memory", False)
+                    break
+            
+            final_data = {
+                "done": True,
+                "citations": citations,
+                "sources": chunks,
+                "from_memory": from_memory,
+                "route_mode": route.mode
+            }
+            yield f"data: {json.dumps(final_data)}\n\n"
+            
+            elapsed_ms = (time.time() - start_time) * 1000
+            if full_response and req.user_id:
+                add_turn(req.user_id, req.query, full_response)
+                
+            try:
+                source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
+                log_response_text = f"[⚡ CACHED] {full_response}" if from_memory else full_response
+                log_query(
+                    user_id=req.user_id,
+                    username=req.username,
+                    query_text=req.query,
+                    response_text=log_response_text[:500],
+                    sources=source_names,
+                    response_time_ms=elapsed_ms,
+                )
+            except Exception as e:
+                logger.error(f"Error logging query: {e}")
+                
+        except Exception as e:
+            logger.error(f"Streaming error: {str(e)}", exc_info=True)
+            yield f"data: {json.dumps({'error': str(e)})}\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
 @app.post("/api/chat/audio", response_model=ChatResponse)
 @limiter.limit("5/minute")
 def api_chat_audio(

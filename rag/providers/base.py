@@ -34,6 +34,13 @@ class LLMProvider(ABC):
         """
 
     @abstractmethod
+    def generate_stream(self, system_prompt: str, user_message: str,
+                        temperature: float, max_tokens: int):
+        """
+        Yield generated text chunks from the LLM.
+        """
+
+    @abstractmethod
     def is_available(self) -> bool:
         """Return True if the provider is configured and reachable."""
 

@@ -48,6 +48,44 @@ class GeminiProvider(LLMProvider):
                 return parts[0].get("text", "").strip()
         return ""
 
+    def generate_stream(self, system_prompt: str, user_message: str,
+                        temperature: float, max_tokens: int):
+        import json
+        url = f"{_GEMINI_BASE}/{self._model}:streamGenerateContent?key={self._api_key}&alt=sse"
+        payload = {
+            "system_instruction": {
+                "parts": [{"text": system_prompt}],
+            },
+            "contents": [
+                {
+                    "role": "user",
+                    "parts": [{"text": user_message}],
+                }
+            ],
+            "generationConfig": {
+                "temperature": temperature,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+        with requests.post(url, json=payload, stream=True, timeout=60) as resp:
+            resp.raise_for_status()
+            for line in resp.iter_lines():
+                if line:
+                    line_text = line.decode('utf-8')
+                    if line_text.startswith("data: "):
+                        data_text = line_text[6:]
+                        try:
+                            data = json.loads(data_text)
+                            candidates = data.get("candidates", [])
+                            if candidates:
+                                parts = candidates[0].get("content", {}).get("parts", [])
+                                if parts:
+                                    chunk = parts[0].get("text", "")
+                                    if chunk:
+                                        yield chunk
+                        except json.JSONDecodeError:
+                            continue
+
     def is_available(self) -> bool:
         return bool(self._api_key) and self._test_connection()
 
