@@ -138,6 +138,7 @@ class PipelineTrace:
         self.expanded_queries = []
         self.query_expansion_checked = False
         self.query_expansion_enabled = False
+        self.query_expansion_reason = None
 
     def record_embedding(self, model: str, dims: int, preview: list, time_ms: float):
         """Record query embedding step."""
@@ -146,10 +147,11 @@ class PipelineTrace:
         self.embedding_preview = preview[:5]  # first 5 values
         self.embedding_time_ms = time_ms
 
-    def record_expansion(self, enabled: bool, expansions: list = None):
+    def record_expansion(self, enabled: bool, expansions: list = None, reason: str = None):
         """Record query expansion step."""
         self.query_expansion_checked = True
         self.query_expansion_enabled = enabled
+        self.query_expansion_reason = reason
         if expansions:
             self.expanded_queries = expansions
 
@@ -246,6 +248,8 @@ class PipelineTrace:
         # ── Step 3b: Query Expansion ──
         if self.query_expansion_checked:
             lines.append(_section("Step 3b| [EXPAND]", "QUERY EXPANSION"))
+            if self.query_expansion_reason:
+                lines.append(_kv("Reason", self.query_expansion_reason))
             if not self.query_expansion_enabled:
                 lines.append(_kv("Status", f"{_DIM}Disabled in config (or LLM skipped){_RESET}"))
             elif self.expanded_queries:

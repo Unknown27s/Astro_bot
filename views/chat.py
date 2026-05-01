@@ -6,6 +6,7 @@ Streamlit-based conversational UI with RAG pipeline.
 import time
 import streamlit as st
 from rag.retriever import retrieve_context, format_context_for_llm, get_source_citations
+from rag.query_router import classify_query_route
 from rag.generator import generate_response, is_llm_available
 from database.db import log_query
 from tests.config import CONV_ENABLED
@@ -67,29 +68,54 @@ def render_chat_page():
                 start_time = time.time()
 
                 # Step 1: Retrieve relevant chunks
-                chunks = retrieve_context(prompt)
+                route = classify_query_route(prompt)
+                
+                if route.mode == "timetable":
+                    from rag.tools.timetable_agent import execute_timetable_agent
+                    response = execute_timetable_agent(prompt)
+                    from_memory = False
+                    chunks = []
+                    citations = ""
+                elif route.mode == "general_chat":
+                    from rag.generator import generate_response_direct
+                    response = generate_response_direct(prompt, user_id=st.session_state.user_id)
+                    from_memory = False
+                    chunks = []
+                    citations = ""
+                else:
+                    chunks = retrieve_context(
+                        prompt, 
+                        source_type=route.source_type, 
+                        filters=route.filters, 
+                        complexity_score=route.complexity_score
+                    )
 
-                # Step 2: Format context for LLM
-                context = format_context_for_llm(chunks)
+                    # Step 2: Format context for LLM
+                    context = format_context_for_llm(chunks)
 
                 # Step 3: Generate response (with memory pre-check and post-store)
-                gen_result = generate_response(
-                    prompt, 
-                    context,
-                    user_id=st.session_state.user_id,
-                    sources=[c.get("source", "") for c in chunks]
-                )
-                
-                # Extract response from dict (handles both old string format and new dict format)
-                if isinstance(gen_result, dict):
-                    response = gen_result.get("response", "")
-                    from_memory = gen_result.get("from_memory", False)
-                else:
-                    response = gen_result  # Fallback for backward compatibility
-                    from_memory = False
+                if chunks:
+                    gen_result = generate_response(
+                        prompt, 
+                        context,
+                        user_id=st.session_state.user_id,
+                        sources=[c.get("source", "") for c in chunks],
+                        route_mode=route.memory_scope
+                    )
+                    
+                    # Extract response from dict (handles both old string format and new dict format)
+                    if isinstance(gen_result, dict):
+                        response = gen_result.get("response", "")
+                        from_memory = gen_result.get("from_memory", False)
+                    else:
+                        response = gen_result  # Fallback for backward compatibility
+                        from_memory = False
 
-                # Step 4: Get citations
-                citations = get_source_citations(chunks)
+                    # Step 4: Get citations
+                    citations = get_source_citations(chunks)
+                else:
+                    # Non-RAG routes already set response
+                    pass
 
                 elapsed_ms = (time.time() - start_time) * 1000
 

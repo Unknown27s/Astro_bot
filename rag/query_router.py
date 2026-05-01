@@ -47,6 +47,8 @@ class QueryRoute:
     reason: str
     source_type: str | None = None
     memory_scope: MemoryScope | None = None
+    filters: dict | None = None
+    complexity_score: int = 1
 
 
 # ---------------------------------------------------------------------------
@@ -261,11 +263,44 @@ def _resolve(
 # Public API
 # ---------------------------------------------------------------------------
 
+def _extract_query_metadata(text: str) -> tuple[dict, int]:
+    """Extract expected department/document_type filters and complexity score."""
+    filters = {}
+    
+    # Department rules
+    if "library" in text:
+        filters["department"] = "library"
+    elif "admission" in text:
+        filters["department"] = "admissions"
+    elif "placement" in text:
+        filters["department"] = "placements"
+    elif "hostel" in text:
+        filters["department"] = "hostel"
+
+    # Document type rules
+    if "policy" in text or "rules" in text:
+        filters["document_type"] = "policy"
+    elif "syllabus" in text:
+        filters["document_type"] = "syllabus"
+    elif "schedule" in text or "calendar" in text or "timetable" in text:
+        filters["document_type"] = "schedule"
+        
+    # Complexity rules
+    words = text.split()
+    complexity_score = 1
+    if len(words) > 12 or any(w in text for w in ["explain", "describe", "detail", "process", "difference"]):
+        complexity_score = 3
+    elif len(words) > 6 or any(w in text for w in ["how", "why"]):
+        complexity_score = 2
+
+    return filters, complexity_score
+
+
 def classify_query_route(query: str) -> QueryRoute:
     if not (text := _normalize(query)):
         return QueryRoute(mode=Route.UNCLEAR, confidence=0.0, reason="empty query")
 
-    return _resolve(
+    route = _resolve(
         text=text,
         official=_OFFICIAL_SITE.score(text),
         document=_DOCUMENT.score(text),
@@ -274,3 +309,12 @@ def classify_query_route(query: str) -> QueryRoute:
         faq_specific=_FAQ_SPECIFIC.score(text),
         general=_GENERAL_CHAT.score(text),
     )
+    
+    filters, complexity = _extract_query_metadata(text)
+    
+    # Use object.__setattr__ because the dataclass is frozen
+    if filters:
+        object.__setattr__(route, 'filters', filters)
+    object.__setattr__(route, 'complexity_score', complexity)
+    
+    return route

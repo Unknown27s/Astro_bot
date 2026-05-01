@@ -592,7 +592,7 @@ export default function ChatLayout() {
 
                   <div className="space-y-6">
                     {messages.map((msg) => (
-                      <motion.div key={msg.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+                      <div key={msg.id}>
                         {msg.type === 'bot' ? (
                           <BotMessage
                             content={msg.content}
@@ -611,7 +611,7 @@ export default function ChatLayout() {
                             timestamp={msg.timestamp}
                           />
                         )}
-                      </motion.div>
+                      </div>
                     ))}
 
                     {loading && <TypingIndicator />}

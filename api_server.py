@@ -284,6 +284,39 @@ def _resolve_document_owner_id(uploaded_by: str | None) -> str:
     )
 
 
+def _extract_zero_ai_metadata(url_or_filename: str) -> tuple[str | None, str | None]:
+    """
+    Zero-AI metadata extraction based on URL or filename heuristics.
+    Returns (department, document_type).
+    """
+    if not url_or_filename:
+        return None, None
+
+    text = url_or_filename.lower()
+    department = None
+    document_type = None
+
+    # Department rules
+    if "library" in text:
+        department = "library"
+    elif "admission" in text:
+        department = "admissions"
+    elif "placement" in text:
+        department = "placements"
+    elif "hostel" in text:
+        department = "hostel"
+
+    # Document type rules
+    if "policy" in text or "rules" in text:
+        document_type = "policy"
+    elif "syllabus" in text:
+        document_type = "syllabus"
+    elif "schedule" in text or "calendar" in text or "timetable" in text:
+        document_type = "schedule"
+
+    return department, document_type
+
+
 def _ingest_official_site_page(page: dict, uploaded_by: str | None, source_hint: str | None = None, index: int | None = None) -> dict:
     """Store one official-site page in SQLite, ChromaDB, and suggestion cache."""
     from ingestion.chunker import chunk_document
@@ -297,6 +330,8 @@ def _ingest_official_site_page(page: dict, uploaded_by: str | None, source_hint:
     page_file_size = int(page.get("file_size") or len(page_text.encode("utf-8")))
     owner_id = _resolve_document_owner_id(uploaded_by)
 
+    department, document_type = _extract_zero_ai_metadata(page_url)
+
     chunks = chunk_document(
         page_text,
         source_name=page_title,
@@ -304,6 +339,8 @@ def _ingest_official_site_page(page: dict, uploaded_by: str | None, source_hint:
         source_url=page_url,
         source_domain=page_domain,
         page_title=page_title,
+        department=department,
+        document_type=document_type,
     )
     if not chunks:
         raise HTTPException(status_code=422, detail=f"No chunks generated from website page: {page_title}")
@@ -508,14 +545,19 @@ def api_chat(req: ChatRequest, request: Request):
             # Bypass retrieval for non-institutional small-talk/general questions.
             gen_result = generate_response_direct(req.query, user_id=req.user_id)
         else:
-            # Step 1: Retrieve relevant chunks
             search_query = _search_query_with_history(req.user_id, req.query)
             if route.mode == "faq":
                 chunks = retrieve_faq_context(req.query)
                 if not chunks:
-                    chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+                    chunks = retrieve_context(
+                        search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type, 
+                        filters=route.filters, complexity_score=route.complexity_score
+                    )
             else:
-                chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+                chunks = retrieve_context(
+                    search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type,
+                    filters=route.filters, complexity_score=route.complexity_score
+                )
 
             # Step 2: Format context for LLM
             context = format_context_for_llm(chunks)
@@ -756,14 +798,19 @@ def api_chat_audio(
         elif route.mode == "general_chat":
             gen_result = generate_response_direct(transcribed_text, user_id=user_id)
         else:
-            # Generate RAG response based on transcribed text
             search_query = _search_query_with_history(user_id, transcribed_text)
             if route.mode == "faq":
                 chunks = retrieve_faq_context(transcribed_text)
                 if not chunks:
-                    chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+                    chunks = retrieve_context(
+                        search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type,
+                        filters=route.filters, complexity_score=route.complexity_score
+                    )
             else:
-                chunks = retrieve_context(search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type)
+                chunks = retrieve_context(
+                    search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type,
+                    filters=route.filters, complexity_score=route.complexity_score
+                )
             context = format_context_for_llm(chunks)
 
             gen_result = generate_response(

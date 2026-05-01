@@ -118,6 +118,8 @@ def chunk_document(
     source_url: str | None = None,
     source_domain: str | None = None,
     page_title: str | None = None,
+    department: str | None = None,
+    document_type: str | None = None,
 ) -> list[dict]:
     """
     Hybrid chunking: first split by structure (headings), then apply fixed-size chunking.
@@ -162,6 +164,10 @@ def chunk_document(
                 metadata["source_domain"] = source_domain
             if page_title:
                 metadata["page_title"] = page_title
+            if department:
+                metadata["department"] = department
+            if document_type:
+                metadata["document_type"] = document_type
 
             all_chunks.append({
                 "text": sub_chunk,

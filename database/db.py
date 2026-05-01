@@ -242,7 +242,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS document_question_suggestions (
                 id          TEXT PRIMARY KEY,
                 document_id TEXT NOT NULL,
-                question    TEXT NOT NULL,
+                question_text TEXT NOT NULL,
                 source_hint TEXT,
                 created_at  TEXT NOT NULL,
                 FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE
@@ -774,7 +774,7 @@ def store_document_question_suggestions(
         ]
         conn.executemany(
             "INSERT INTO document_question_suggestions "
-            "(id, document_id, question, source_hint, created_at) VALUES (?,?,?,?,?)",
+            "(id, document_id, question_text, source_hint, created_at) VALUES (?,?,?,?,?)",
             rows,
         )
     return len(rows)

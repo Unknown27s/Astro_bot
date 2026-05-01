@@ -105,7 +105,9 @@ Guidelines:
 2. If the question is unclear, infer likely intent and provide a best-effort helpful answer.
 3. If institutional context is missing, use your broader knowledge and reasoning to answer clearly.
 4. For official policy-like topics, mention when the response is general guidance and recommend verification with the institute office.
-5. Keep responses concise, practical, and student-friendly."""
+5. Keep responses concise, practical, and student-friendly.
+6. Use Markdown formatting heavily to make your answers easy to read. Use bulleted or numbered lists for steps/points, bold text for key terms, and horizontal rules (---) to separate major sections.
+7. If the user asks for a comparison or the difference between multiple items, always format your response as a clear Markdown table."""
 
 SYSTEM_PROMPT = os.getenv("SYSTEM_PROMPT", _DEFAULT_SYSTEM_PROMPT)
 SYSTEM_PROMPT = SYSTEM_PROMPT.replace("\\n", "\n")

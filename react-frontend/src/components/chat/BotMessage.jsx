@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
 import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { Copy, ThumbsUp, ThumbsDown } from 'lucide-react';
 import { useState } from 'react';
 import chatbotLogo from '../../assets/astrobot-logo.svg';
@@ -37,7 +38,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="mb-6 flex gap-3"
+      className="flex gap-3"
     >
       <img
         src={CHATBOT_LOGO_URL}
@@ -65,8 +66,8 @@ export default function BotMessage({ content, sources = [], citations = '', time
 
         {/* Main Message */}
         <div className="astro-glass-heavy max-w-3xl rounded-2xl rounded-tl-sm border border-white p-4 text-slate-50 md:p-5">
-          <div className="prose prose-sm max-w-none prose-headings:text-cyan-100 prose-strong:text-white prose-p:text-slate-50 prose-a:text-cyan-200 prose-code:text-cyan-100">
-            <ReactMarkdown>{content}</ReactMarkdown>
+          <div className="prose prose-sm max-w-none prose-headings:text-cyan-100 prose-strong:text-white prose-p:text-slate-50 prose-a:text-cyan-200 prose-code:text-cyan-100 prose-th:text-cyan-100 prose-td:text-slate-100 prose-table:border-collapse prose-table:border prose-table:border-white/20 prose-td:border prose-td:border-white/10 prose-th:border prose-th:border-white/20 prose-th:bg-cyan-900/30">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
           </div>
         </div>
 

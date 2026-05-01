@@ -21,12 +21,15 @@ Fixes applied vs original:
 
 from __future__ import annotations
 
+import logging
 import math
 import re
 import time
 from collections import Counter, defaultdict
 from functools import lru_cache
 from typing import NamedTuple
+
+logger = logging.getLogger(__name__)
 
 from ingestion.embedder import get_collection, generate_embeddings
 from rag.providers.manager import get_manager
@@ -334,12 +337,25 @@ def _dense_candidates(
     source_type: str | None,
     doc_id: str | None,
     limit: int,
+    filters: dict | None = None,
 ) -> list[dict]:
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=limit,
-        include=["documents", "metadatas", "distances"],
-    )
+    try:
+        kwargs = {
+            "query_embeddings": [query_embedding],
+            "n_results": limit,
+            "include": ["documents", "metadatas", "distances"],
+        }
+        if filters:
+            kwargs["where"] = filters
+            
+        results = collection.query(**kwargs)
+    except Exception as exc:
+        logger.error(
+            "ChromaDB dense query failed (possible index corruption): %s",
+            exc,
+            exc_info=True,
+        )
+        return []
 
     if not results or not (results.get("documents") or [[]])[0]:
         return []
@@ -347,6 +363,7 @@ def _dense_candidates(
     candidates: list[dict] = []
     for idx, doc in enumerate(results["documents"][0]):
         meta = (results.get("metadatas") or [[{}] * limit])[0][idx]
+        meta = meta or {}
         if not _safe_source_type(meta, source_type):
             continue
         if not _safe_doc_id(meta, doc_id):
@@ -490,31 +507,45 @@ def _retrieve_candidates_for_text(
     doc_id: str | None,
     top_k: int,
     list_query: bool,
+    filters: dict | None = None,
 ) -> list[dict]:
     """Run dense/hybrid retrieval for a given text and return scored candidates."""
-    retrieval_tokens = _tokenize(retrieval_text)
-    query_embedding = list(_cached_embedding(retrieval_text))
+    try:
+        retrieval_tokens = _tokenize(retrieval_text)
+        query_embedding = list(_cached_embedding(retrieval_text))
 
-    dense_mult = _DENSE_MULTIPLIER_LIST if list_query else _DENSE_MULTIPLIER_DEFAULT
-    bm25_mult = _BM25_MULTIPLIER_LIST if list_query else _BM25_MULTIPLIER_DEFAULT
-    dense_limit = min(max(top_k * dense_mult, HYBRID_DENSE_CANDIDATES), collection.count())
-    bm25_limit = min(max(top_k * bm25_mult, HYBRID_BM25_CANDIDATES), collection.count())
+        col_count = collection.count()
+        if col_count == 0:
+            return []
 
-    dense = _dense_candidates(collection, query_embedding, source_type, doc_id, dense_limit)
+        dense_mult = _DENSE_MULTIPLIER_LIST if list_query else _DENSE_MULTIPLIER_DEFAULT
+        bm25_mult = _BM25_MULTIPLIER_LIST if list_query else _BM25_MULTIPLIER_DEFAULT
+        dense_limit = min(max(top_k * dense_mult, HYBRID_DENSE_CANDIDATES), col_count)
+        bm25_limit = min(max(top_k * bm25_mult, HYBRID_BM25_CANDIDATES), col_count)
 
-    if RETRIEVAL_MODE == "dense":
-        all_candidates = dense
-        for c in all_candidates:
-            c["score"] = round(c["dense_score"], 4)
-    else:
-        index = _get_bm25_index(collection)
-        bm25 = index.query(retrieval_tokens, source_type, doc_id, bm25_limit)
-        all_candidates = _merge_candidates(dense, bm25)
+        dense = _dense_candidates(collection, query_embedding, source_type, doc_id, dense_limit, filters)
 
-    if list_query:
-        all_candidates = _apply_list_boost(all_candidates)
+        if RETRIEVAL_MODE == "dense":
+            all_candidates = dense
+            for c in all_candidates:
+                c["score"] = round(c["dense_score"], 4)
+        else:
+            index = _get_bm25_index(collection)
+            bm25 = index.query(retrieval_tokens, source_type, doc_id, bm25_limit)
+            all_candidates = _merge_candidates(dense, bm25)
 
-    return all_candidates
+        if list_query:
+            all_candidates = _apply_list_boost(all_candidates)
+
+        return all_candidates
+    except Exception as exc:
+        logger.error(
+            "Retrieval failed for text '%s': %s",
+            retrieval_text[:80],
+            exc,
+            exc_info=True,
+        )
+        return []
 
 
 def _blend_hyde_candidates(base_candidates: list[dict], hyde_candidates: list[dict]) -> list[dict]:
@@ -765,6 +796,8 @@ def retrieve_context(
     doc_id: str | None = None,
     trace=None,
     obs_trace=None,
+    filters: dict | None = None,
+    complexity_score: int = 1,
     **_kwargs,
 ) -> list[dict]:
     """
@@ -777,6 +810,8 @@ def retrieve_context(
         doc_id:      Optional document ID filter for single-document retrieval.
         trace:       Optional tracing span (Langfuse / OpenTelemetry).
         obs_trace:   Optional secondary observability handle.
+        filters:     Optional metadata dictionary to hard-filter ChromaDB search.
+        complexity_score: Complexity of query (1=simple, 3=complex). Determines HyDE/Expansion usage.
 
     Returns:
         List of dicts with keys: text, source, heading, score, doc_id,
@@ -788,7 +823,7 @@ def retrieve_context(
     obs_span = _start_obs_span(
         obs_trace,
         name="rag.retrieve_context",
-        input_payload={"query": query, "top_k": top_k, "source_type": source_type, "doc_id": doc_id},
+        input_payload={"query": query, "top_k": top_k, "source_type": source_type, "doc_id": doc_id, "filters": filters},
     )
 
     trace_start = time.perf_counter()
@@ -805,21 +840,24 @@ def retrieve_context(
     from rag.query_expansion import expand_and_retrieve
     from tests.config import QUERY_EXPANSION_ENABLED, QUERY_EXPANSION_TRIGGER_SCORE
 
+    fetch_k = top_k * 4
+    
     # Step 1: Retrieve with original query first
     original_candidates = _retrieve_candidates_for_text(
         collection=collection,
         retrieval_text=query_text or query,
         source_type=source_type,
         doc_id=doc_id,
-        top_k=top_k,
+        top_k=fetch_k,
         list_query=list_query,
+        filters=filters,
     )
 
     # Step 2: Check top score to decide if expansion is needed
     top_score = max((float(c.get("score", 0.0)) for c in original_candidates), default=0.0)
 
-    # Step 3: Apply query expansion if enabled and score is below threshold
-    if QUERY_EXPANSION_ENABLED and top_score < QUERY_EXPANSION_TRIGGER_SCORE:
+    # Step 3: Apply query expansion if enabled and score is below threshold AND query is complex
+    if QUERY_EXPANSION_ENABLED and top_score < QUERY_EXPANSION_TRIGGER_SCORE and complexity_score > 1:
         all_candidates = expand_and_retrieve(
             query=query_text or query,
             retrieve_fn=_retrieve_candidates_for_text,
@@ -827,19 +865,20 @@ def retrieve_context(
                 "collection": collection,
                 "source_type": source_type,
                 "doc_id": doc_id,
-                "top_k": top_k,
+                "top_k": fetch_k,
                 "list_query": list_query,
+                "filters": filters,
             },
             trace=trace,
             top_score=top_score,
         )
     else:
-        # Score is good or expansion disabled - use original results
+        # Score is good, expansion disabled, or query too simple - use original results
         all_candidates = original_candidates
 
     hyde_applied = False
     top_score = max((float(c.get("score", 0.0)) for c in all_candidates), default=0.0)
-    if HYDE_ENABLED and top_score < HYDE_TRIGGER_SCORE:
+    if HYDE_ENABLED and top_score < HYDE_TRIGGER_SCORE and complexity_score > 1:
         hyde_text = _generate_hypothetical_passage(query)
         if hyde_text:
             hyde_applied = True
@@ -848,15 +887,24 @@ def retrieve_context(
                 retrieval_text=_normalize(hyde_text),
                 source_type=source_type,
                 doc_id=doc_id,
-                top_k=top_k,
+                top_k=fetch_k,
                 list_query=list_query,
+                filters=filters,
             )
             all_candidates = _blend_hyde_candidates(all_candidates, hyde_candidates)
 
     # Drop low-confidence chunks before page ranking
     all_candidates = [c for c in all_candidates if c.get("score", 0.0) >= MIN_SCORE_THRESHOLD]
 
-    ranked = _rank_by_page(all_candidates, top_k)
+    from rag.reranker import rerank_candidates
+    reranked = rerank_candidates(query, all_candidates, top_k * 2)
+
+    # Update scores to rerank score for page ranking if available
+    for c in reranked:
+        if "rerank_score" in c:
+            c["score"] = c["rerank_score"]
+
+    ranked = _rank_by_page(reranked, top_k)
     if FULL_PAGE_RAG_ENABLED:
         ranked = _expand_to_full_pages(
             collection=collection,

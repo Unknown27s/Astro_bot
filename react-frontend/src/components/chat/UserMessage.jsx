@@ -6,7 +6,7 @@ export default function UserMessage({ content, timestamp }) {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3 }}
-      className="mb-5 flex justify-end"
+      className="flex justify-end"
     >
       <div className="max-w-[85%] space-y-2 md:max-w-[75%]">
         <div className="flex items-center justify-end gap-2">
