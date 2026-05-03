@@ -43,7 +43,7 @@ export default function BotMessage({ content, sources = [], citations = '', time
       <img
         src={CHATBOT_LOGO_URL}
         alt="AstroBot logo"
-        className="astro-glow-cyan mt-1 h-10 w-10 shrink-0 rounded-full border border-cyan-300/30 object-cover"
+        className="astro-glow-cyan mt-1 h-20 w-20 shrink-0 rounded-full border border-cyan-300/30 object-cover"
         onError={(event) => {
           event.currentTarget.onerror = null;
           event.currentTarget.src = chatbotLogo;
@@ -69,7 +69,12 @@ export default function BotMessage({ content, sources = [], citations = '', time
           <div className="prose prose-sm md:prose-base prose-invert max-w-none prose-headings:text-cyan-100 prose-headings:font-bold prose-p:text-slate-200 prose-p:leading-relaxed prose-a:text-cyan-300 hover:prose-a:text-cyan-100 prose-a:transition-colors prose-a:decoration-cyan-500/30 hover:prose-a:decoration-cyan-400 prose-strong:text-white prose-strong:font-semibold prose-code:text-cyan-200 prose-code:bg-cyan-950/40 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded-md prose-code:before:content-none prose-code:after:content-none prose-pre:bg-[#0f172a] prose-pre:border prose-pre:border-white/10 prose-pre:shadow-inner prose-blockquote:border-l-cyan-500 prose-blockquote:bg-cyan-950/20 prose-blockquote:px-4 prose-blockquote:py-1 prose-blockquote:rounded-r-lg prose-blockquote:text-slate-300 prose-blockquote:not-italic prose-li:marker:text-cyan-500 prose-ul:my-2 prose-ol:my-2 prose-table:border-collapse prose-table:w-full prose-table:overflow-hidden prose-table:rounded-lg prose-th:bg-cyan-900/40 prose-th:text-cyan-100 prose-th:font-semibold prose-th:p-3 prose-th:border prose-th:border-white/10 prose-td:p-3 prose-td:border prose-td:border-white/5 prose-td:text-slate-300 prose-tr:border-b prose-tr:border-white/5 even:prose-tr:bg-white/[0.02] hover:prose-tr:bg-white/[0.04] prose-tr:transition-colors">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
             {isStreaming && (
-              <span className="inline-block h-4 w-1.5 animate-pulse rounded-full bg-cyan-400 ml-0.5 align-middle" />
+              <motion.span
+                aria-label="Streaming"
+                animate={{ rotate: 360 }}
+                transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                className="ml-1 inline-block h-3.5 w-3.5 align-middle rounded-full border-2 border-cyan-300/35 border-t-cyan-300"
+              />
             )}
           </div>
         </div>

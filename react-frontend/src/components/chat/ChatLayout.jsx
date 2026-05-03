@@ -5,7 +5,6 @@ import { Bell } from 'lucide-react';
 import BotMessage from './BotMessage';
 import UserMessage from './UserMessage';
 import ChatInputArea from './ChatInputArea';
-import TypingIndicator from './TypingIndicator';
 import ChatSidebar from './ChatSidebar';
 import { useAuth } from '../../context/AuthContext';
 import { sendChat, streamChat, sendAudioMessage, getAnnouncements, getSuggestions, submitFeedback } from '../../services/api';
@@ -22,6 +21,13 @@ const getWelcomeMessage = () => ({
 });
 
 const buildId = () => `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+const STREAM_WAITING_TEXTS = [
+  'Thinking through your request...',
+  'Gathering the best answer...',
+  'Checking relevant sources...',
+  'Preparing a clear response...',
+];
+const isStreamWaitingText = (value) => STREAM_WAITING_TEXTS.includes(value);
 
 const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
   const items = [];
@@ -74,6 +80,7 @@ export default function ChatLayout() {
   const [activeView, setActiveView] = useState('chat');
   const [activeAnnouncementId, setActiveAnnouncementId] = useState(null);
   const [currentConversationId, setCurrentConversationId] = useState(null);
+  const [waitingTextIndex, setWaitingTextIndex] = useState(0);
   const messagesEndRef = useRef(null);
   const hydratedRef = useRef(false);
   const mediaRecorderRef = useRef(null);
@@ -108,6 +115,19 @@ export default function ChatLayout() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  useEffect(() => {
+    if (!loading) {
+      setWaitingTextIndex(0);
+      return;
+    }
+
+    const timer = setInterval(() => {
+      setWaitingTextIndex((prev) => (prev + 1) % STREAM_WAITING_TEXTS.length);
+    }, 1400);
+
+    return () => clearInterval(timer);
+  }, [loading]);
 
   // Load conversations from localStorage on mount
   useEffect(() => {
@@ -257,7 +277,7 @@ export default function ChatLayout() {
     const botMsgPlaceholder = {
       id: botMsgId,
       type: 'bot',
-      content: '',
+      content: STREAM_WAITING_TEXTS[0],
       sources: [],
       citations: '',
       routeMode: '',
@@ -278,7 +298,10 @@ export default function ChatLayout() {
           setMessages((prev) =>
             prev.map((msg) =>
               msg.id === botMsgId
-                ? { ...msg, content: msg.content + chunk }
+                ? {
+                  ...msg,
+                  content: isStreamWaitingText(msg.content) ? chunk : msg.content + chunk,
+                }
                 : msg
             )
           );
@@ -289,12 +312,12 @@ export default function ChatLayout() {
             prev.map((msg) =>
               msg.id === botMsgId
                 ? {
-                    ...msg,
-                    sources: finalData.sources || [],
-                    citations: finalData.citations || '',
-                    routeMode: finalData.route_mode || '',
-                    isStreaming: false,
-                  }
+                  ...msg,
+                  sources: finalData.sources || [],
+                  citations: finalData.citations || '',
+                  routeMode: finalData.route_mode || '',
+                  isStreaming: false,
+                }
                 : msg
             )
           );
@@ -326,10 +349,10 @@ export default function ChatLayout() {
             prev.map((msg) =>
               msg.id === botMsgId
                 ? {
-                    ...msg,
-                    content: msg.content || 'Sorry, I encountered an error processing your request. Please try again.',
-                    isStreaming: false,
-                  }
+                  ...msg,
+                  content: msg.content || 'Sorry, I encountered an error processing your request. Please try again.',
+                  isStreaming: false,
+                }
                 : msg
             )
           );
@@ -647,7 +670,9 @@ export default function ChatLayout() {
                       <div key={msg.id}>
                         {msg.type === 'bot' ? (
                           <BotMessage
-                            content={msg.content}
+                            content={msg.isStreaming && isStreamWaitingText(msg.content)
+                              ? STREAM_WAITING_TEXTS[waitingTextIndex]
+                              : msg.content}
                             sources={msg.sources}
                             citations={msg.citations}
                             routeMode={msg.routeMode}
@@ -667,7 +692,6 @@ export default function ChatLayout() {
                       </div>
                     ))}
 
-                    {loading && <TypingIndicator />}
                     <div ref={messagesEndRef} />
                   </div>
                 </div>

@@ -79,7 +79,7 @@ export default function ChatSidebar({
               <img
                 src={CHATBOT_LOGO_URL}
                 alt="AstroBot logo"
-                className="astro-glow-cyan h-10 w-10 rounded-xl border border-cyan-300/35 object-cover"
+                className="astro-glow-cyan h-20 w-20 rounded-xl border border-cyan-300/35 object-cover"
                 onError={(event) => {
                   event.currentTarget.onerror = null;
                   event.currentTarget.src = chatbotLogo;
