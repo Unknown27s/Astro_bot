@@ -89,7 +89,8 @@ public class PythonApiService {
     /**
      * Stream a chat response from the Python FastAPI backend via SSE.
      * Returns a Flux of SSE data payloads (the JSON inside each "data:" line).
-     * Spring WebClient auto-parses SSE events; Spring MVC re-wraps them for the browser.
+     * Spring WebClient auto-parses SSE events; Spring MVC re-wraps them for the
+     * browser.
      */
     public Flux<String> chatStream(String query, String userId, String username) {
         return client.post()
@@ -184,6 +185,42 @@ public class PythonApiService {
     public Map<String, Object> deleteDocument(String docId) {
         return client.delete()
                 .uri("/api/documents/{docId}", docId)
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    // ── Student Marks ──
+
+    public Map<String, Object> uploadStudents(MultipartFile file, String uploadedBy) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("file", file.getResource());
+        if (uploadedBy != null && !uploadedBy.isEmpty()) {
+            builder.part("uploaded_by", uploadedBy);
+        }
+
+        return client.post()
+                .uri("/api/admin/upload/students")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(builder.build()))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> uploadMarks(MultipartFile file, String uploadedBy) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("file", file.getResource());
+        if (uploadedBy != null && !uploadedBy.isEmpty()) {
+            builder.part("uploaded_by", uploadedBy);
+        }
+
+        return client.post()
+                .uri("/api/admin/upload/marks")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(builder.build()))
                 .retrieve()
                 .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
                 })

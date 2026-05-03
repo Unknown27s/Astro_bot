@@ -1,0 +1,41 @@
+roll_no,subject_code,subject_name,semester,internal_marks,external_marks,grade
+CS001,CS401,Data Structures & Algorithms,4,18,72,A
+CS001,CS402,Database Management Systems,4,17,68,A
+CS001,CS403,Web Development,4,19,75,A+
+CS001,CS404,Operating Systems,4,16,65,B+
+CS002,CS401,Data Structures & Algorithms,4,19,78,A+
+CS002,CS402,Database Management Systems,4,18,72,A
+CS002,CS403,Web Development,4,20,80,A+
+CS002,CS404,Operating Systems,4,17,70,A
+CS003,CS401,Data Structures & Algorithms,4,15,62,B
+CS003,CS402,Database Management Systems,4,16,64,B+
+CS003,CS403,Web Development,4,17,68,A
+CS003,CS404,Operating Systems,4,14,58,B
+CS004,CS401,Data Structures & Algorithms,4,19,76,A+
+CS004,CS402,Database Management Systems,4,20,79,A+
+CS004,CS403,Web Development,4,19,77,A+
+CS004,CS404,Operating Systems,4,18,72,A
+CS005,CS401,Data Structures & Algorithms,4,17,70,A
+CS005,CS402,Database Management Systems,4,18,73,A
+CS005,CS403,Web Development,4,16,66,B+
+CS005,CS404,Operating Systems,4,17,71,A
+EC001,EC401,Circuit Theory,4,16,64,B+
+EC001,EC402,Digital Electronics,4,17,68,A
+EC001,EC403,Electromagnetics,4,15,62,B
+EC001,EC404,Control Systems,4,14,60,B
+EC002,EC401,Circuit Theory,4,18,72,A
+EC002,EC402,Digital Electronics,4,19,75,A+
+EC002,EC403,Electromagnetics,4,17,70,A
+EC002,EC404,Control Systems,4,16,65,B+
+EC003,EC401,Circuit Theory,4,19,77,A+
+EC003,EC402,Digital Electronics,4,18,74,A
+EC003,EC403,Electromagnetics,4,20,80,A+
+EC003,EC404,Control Systems,4,17,69,A
+ME001,ME401,Thermodynamics,4,15,62,B
+ME001,ME402,Fluid Mechanics,4,16,64,B+
+ME001,ME403,Machine Design,4,14,58,B
+ME001,ME404,Manufacturing Processes,4,15,61,B
+ME002,ME401,Thermodynamics,4,19,76,A+
+ME002,ME402,Fluid Mechanics,4,18,74,A
+ME002,ME403,Machine Design,4,20,80,A+
+ME002,ME404,Manufacturing Processes,4,19,77,A+

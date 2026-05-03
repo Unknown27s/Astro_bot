@@ -1,0 +1,21 @@
+course_code,course_name,department,semester,section,day,start_time,end_time,room,instructor
+CS301,Data Structures,CS,3,A,Monday,09:00,10:00,Room 101,Dr. A Kumar
+CS302,Algorithms,CS,3,A,Monday,10:15,11:15,Room 102,Dr. S Patel
+CS303,Database Systems,CS,3,A,Monday,11:30,12:30,Room 103,Dr. R Singh
+CS304,Operating Systems,CS,3,A,Tuesday,09:00,10:00,Room 101,Dr. A Kumar
+CS305,Computer Networks,CS,3,A,Tuesday,10:15,11:15,Room 102,Dr. S Patel
+CS306,Software Engineering,CS,3,A,Tuesday,11:30,12:30,Room 103,Dr. R Singh
+CS301,Data Structures,CS,3,B,Wednesday,09:00,10:00,Room 201,Dr. K Mehta
+CS302,Algorithms,CS,3,B,Wednesday,10:15,11:15,Room 202,Dr. M Rao
+CS303,Database Systems,CS,3,B,Wednesday,11:30,12:30,Room 203,Dr. P Iyer
+CS304,Operating Systems,CS,3,B,Thursday,09:00,10:00,Room 201,Dr. K Mehta
+CS305,Computer Networks,CS,3,B,Thursday,10:15,11:15,Room 202,Dr. M Rao
+CS306,Software Engineering,CS,3,B,Thursday,11:30,12:30,Room 203,Dr. P Iyer
+MA201,Calculus,CS,3,A,Friday,09:00,10:00,Room 101,Dr. N Verma
+PH101,Physics Lab,CS,3,A,Friday,10:15,12:15,Lab 1,Dr. L Thomas
+EL110,Electronics,EC,3,A,Monday,09:00,10:00,Room 301,Dr. V Sharma
+ME210,Thermodynamics,ME,3,A,Tuesday,13:30,14:30,Room 401,Dr. H Joshi
+CS307,Web Technologies,CS,3,A,Wednesday,13:30,14:30,Room 103,Dr. R Singh
+CS308,Machine Learning,CS,3,A,Thursday,14:45,16:15,Room 102,Dr. S Patel
+CS309,Compiler Design,CS,3,B,Friday,13:30,14:30,Room 203,Dr. P Iyer
+CS310,Project Lab,CS,3,B,Friday,15:00,17:00,Lab 2,Dr. K Mehta

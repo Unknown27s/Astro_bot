@@ -1,3 +1,46 @@
+"""Parse timetable CSV/XLSX into normalized dict rows.
+Expected columns (any of):
+ - course_code / class_name / course
+ - course_name / subject / subject_name
+ - department
+ - semester
+ - section
+ - day
+ - start_time
+ - end_time
+ - room
+ - instructor
+
+Returns list[dict].
+"""
+import csv
+import io
+
+def parse_timetable_csv(content: bytes, file_ext: str) -> list[dict]:
+    if file_ext == ".xlsx":
+        try:
+            import openpyxl
+            from io import BytesIO
+            wb = openpyxl.load_workbook(BytesIO(content))
+            ws = wb.active
+            rows = list(ws.iter_rows(values_only=True))
+            if not rows:
+                return []
+            headers = [str(h).lower().strip() for h in rows[0]]
+            result = []
+            for row in rows[1:]:
+                if any(row):
+                    result.append(dict(zip(headers, row)))
+            return result
+        except Exception as e:
+            raise ValueError(f"Failed to parse XLSX: {e}")
+    else:
+        try:
+            text = content.decode('utf-8')
+            reader = csv.DictReader(io.StringIO(text))
+            return [dict(row) for row in reader]
+        except Exception as e:
+            raise ValueError(f"Failed to parse CSV: {e}")
 import pandas as pd
 import io
 import re

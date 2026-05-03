@@ -28,6 +28,7 @@ class Route(StrEnum):
     OFFICIAL_SITE = "official_site"
     DOCUMENT      = "document"
     TIMETABLE     = "timetable"
+    STUDENT_MARKS = "student_marks"
     FAQ           = "faq"
     HYBRID        = "hybrid"
     GENERAL_CHAT  = "general_chat"
@@ -115,6 +116,17 @@ _TIMETABLE = _SignalGroup(
     }),
 )
 
+_STUDENT_MARKS = _SignalGroup(
+    name="student_marks",
+    keywords=frozenset({
+        "mark", "marks", "score", "grades", "grade", "result", "results",
+        "cgpa", "gpa", "semester", "internal", "external", "marks sheet",
+        "percentage", "exam marks", "test marks", "assignment marks"
+    }),
+    base_confidence=0.70,
+    confidence_per_hit=0.12,
+)
+
 _FAQ = _SignalGroup(
     name="faq",
     keywords=frozenset({
@@ -167,6 +179,7 @@ def _resolve(
     official: tuple[int, list[str]],
     document: tuple[int, list[str]],
     timetable: tuple[int, list[str]],
+    student_marks: tuple[int, list[str]],
     faq:      tuple[int, list[str]],
     faq_specific: tuple[int, list[str]],
     general:  tuple[int, list[str]],
@@ -174,6 +187,7 @@ def _resolve(
     official_n, official_hits = official
     document_n, document_hits = document
     timetable_n, timetable_hits = timetable
+    student_marks_n, student_marks_hits = student_marks
     faq_n,      faq_hits      = faq
     faq_specific_n, _         = faq_specific
     general_n,  general_hits  = general
@@ -184,7 +198,16 @@ def _resolve(
             mode=Route.TIMETABLE,
             confidence=_TIMETABLE.confidence(timetable_n),
             reason=f"timetable/schedule signals: {', '.join(timetable_hits[:4])}",
-            source_type="database",
+            source_type="timetable",
+        )
+
+    # Student marks explicitly overrides other routes
+    if student_marks_n > 0:
+        return QueryRoute(
+            mode=Route.STUDENT_MARKS,
+            confidence=_STUDENT_MARKS.confidence(student_marks_n),
+            reason=f"student marks signals: {', '.join(student_marks_hits[:4])}",
+            source_type="student_marks",
         )
 
     has_institutional = bool(official_n or document_n or faq_specific_n)
@@ -305,6 +328,7 @@ def classify_query_route(query: str) -> QueryRoute:
         official=_OFFICIAL_SITE.score(text),
         document=_DOCUMENT.score(text),
         timetable=_TIMETABLE.score(text),
+        student_marks=_STUDENT_MARKS.score(text),
         faq=_FAQ.score(text),
         faq_specific=_FAQ_SPECIFIC.score(text),
         general=_GENERAL_CHAT.score(text),

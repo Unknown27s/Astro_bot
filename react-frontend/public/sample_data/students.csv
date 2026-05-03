@@ -1,0 +1,11 @@
+roll_no,name,email,phone,department,semester,gpa
+CS001,Rahul Kumar,rahul.kumar@imsuniversity.ac.in,9876543210,Computer Science,4,7.85
+CS002,Priya Singh,priya.singh@imsuniversity.ac.in,9876543211,Computer Science,4,8.12
+CS003,Akshay Patel,akshay.patel@imsuniversity.ac.in,9876543212,Computer Science,4,7.45
+CS004,Sneha Sharma,sneha.sharma@imsuniversity.ac.in,9876543213,Computer Science,4,8.56
+CS005,Amit Gupta,amit.gupta@imsuniversity.ac.in,9876543214,Computer Science,4,7.92
+EC001,Neha Verma,neha.verma@imsuniversity.ac.in,9876543215,Electronics,4,7.68
+EC002,Vikram Singh,vikram.singh@imsuniversity.ac.in,9876543216,Electronics,4,8.23
+EC003,Anjali Das,anjali.das@imsuniversity.ac.in,9876543217,Electronics,4,7.98
+ME001,Arjun Nair,arjun.nair@imsuniversity.ac.in,9876543218,Mechanical,4,7.54
+ME002,Pooja Reddy,pooja.reddy@imsuniversity.ac.in,9876543219,Mechanical,4,8.34

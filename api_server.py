@@ -1395,6 +1395,189 @@ def api_upload_timetable(
     }
 
 
+@app.post("/api/admin/upload/students")
+@limiter.limit("10/minute")
+def api_upload_students(
+    request: Request,
+    file: UploadFile = File(...),
+    uploaded_by: Optional[str] = Form(None),
+):
+    """Upload and parse student master data (admin only)."""
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can upload student data")
+
+    original_filename = file.filename or "students.csv"
+    file_ext = Path(original_filename).suffix.lower()
+    
+    if file_ext not in (".csv", ".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    from ingestion.student_parser import parse_students_csv
+    from database.student_db import bulk_add_students
+    try:
+        students_list = parse_students_csv(content, file_ext)
+    except Exception as e:
+        logger.error(f"Failed to parse students file: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse students file: {str(e)}")
+
+    if not students_list:
+        raise HTTPException(status_code=422, detail="No student records found. Check your file format.")
+
+    try:
+        count_added = bulk_add_students(students_list)
+        return {
+            "status": "success",
+            "students_added": count_added,
+            "total_records": len(students_list),
+        }
+    except Exception as e:
+        logger.error(f"Database error saving students: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save students: {str(e)}")
+
+
+@app.post("/api/admin/upload/marks")
+@limiter.limit("10/minute")
+def api_upload_marks(
+    request: Request,
+    file: UploadFile = File(...),
+    uploaded_by: Optional[str] = Form(None),
+):
+    """Upload and parse student marks data (admin/faculty)."""
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] not in ("admin", "faculty"):
+            raise HTTPException(status_code=403, detail="Only admins and faculty can upload marks")
+
+    original_filename = file.filename or "marks.csv"
+    file_ext = Path(original_filename).suffix.lower()
+    
+    if file_ext not in (".csv", ".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    from ingestion.student_parser import parse_marks_csv
+    from database.student_db import bulk_add_student_marks
+    try:
+        marks_list = parse_marks_csv(content, file_ext)
+    except Exception as e:
+        logger.error(f"Failed to parse marks file: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse marks file: {str(e)}")
+
+    if not marks_list:
+        raise HTTPException(status_code=422, detail="No marks records found. Check your file format.")
+
+    try:
+        count_added = bulk_add_student_marks(marks_list)
+        return {
+            "status": "success",
+            "marks_added": count_added,
+            "total_records": len(marks_list),
+        }
+    except Exception as e:
+        logger.error(f"Database error saving marks: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save marks: {str(e)}")
+
+
+@app.get("/api/admin/students")
+@limiter.limit("30/minute")
+def api_get_students(request: Request):
+    """Return list of students (admin only)."""
+    # Basic role check via header user id — keep simple for now
+    user_id = get_user_id(request)
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row or row[0] != 'admin':
+            raise HTTPException(status_code=403, detail="Only administrators can list students")
+    finally:
+        conn.close()
+
+    from database.db import get_connection as _get_conn
+    with _get_conn() as c:
+        rows = c.execute("SELECT id, roll_no, name, email, phone, department, semester, gpa, uploaded_at FROM students ORDER BY uploaded_at DESC").fetchall()
+    return [dict(r) for r in rows]
+
+
+@app.post("/api/admin/upload/timetable")
+@limiter.limit("10/minute")
+def api_upload_timetable(request: Request, file: UploadFile = File(...), uploaded_by: Optional[str] = Form(None)):
+    """Upload CSV/XLSX timetable and store entries.
+    Admin-only.
+    """
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] != "admin":
+            raise HTTPException(status_code=403, detail="Only administrators can upload timetable data")
+
+    original_filename = file.filename or "timetable.csv"
+    file_ext = Path(original_filename).suffix.lower()
+    if file_ext not in (".csv", ".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    # Parse timetable
+    try:
+        from ingestion.timetable_parser import parse_timetable_csv
+        entries = parse_timetable_csv(content, file_ext)
+    except Exception as e:
+        logger.error(f"Failed to parse timetable file: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse timetable file: {str(e)}")
+
+    if not entries:
+        raise HTTPException(status_code=422, detail="No timetable entries found. Check your file format.")
+
+    # Store entries
+    from database.db import add_timetable_entry
+    added = 0
+    try:
+        for row in entries:
+            # Map expected fields: course_code or class_name -> class_name, subject -> course_name
+            class_name = row.get('class_name') or row.get('course_code') or row.get('course') or ''
+            subject = row.get('subject') or row.get('course_name') or row.get('subject_name') or ''
+            day = row.get('day') or ''
+            start_time = row.get('start_time') or ''
+            end_time = row.get('end_time') or ''
+            room = row.get('room') or ''
+            if not (class_name and subject and day and start_time and end_time):
+                continue
+            add_timetable_entry(class_name, day, start_time, end_time, subject, room, uploaded_by)
+            added += 1
+        return {"status": "success", "entries_added": added, "total_records": len(entries)}
+    except Exception as e:
+        logger.error(f"Database error saving timetable: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save timetable: {str(e)}")
+
+
 @app.post("/api/documents/ingest-url")
 @limiter.limit("10/minute")
 def api_ingest_document_url(req: IngestUrlRequest, request: Request):

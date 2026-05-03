@@ -8,6 +8,7 @@ import {
   Zap,
   Settings,
   LogOut,
+  BookOpen,
 } from 'lucide-react';
 import { cn } from '../../utils/cn';
 
@@ -23,6 +24,18 @@ const menuItems = [
     label: 'Documents',
     icon: FileText,
     href: '/admin/documents',
+  },
+  {
+    id: 'student-data',
+    label: 'Student Data',
+    icon: BookOpen,
+    href: '/admin/student-data',
+  },
+  {
+    id: 'timetable',
+    label: 'Timetable',
+    icon: FileText,
+    href: '/admin/timetable',
   },
   {
     id: 'users',
@@ -89,6 +102,26 @@ export default function AdminSidebar({ isOpen, onClose }) {
             </button>
           </div>
           <p className="text-xs text-slate-500 mt-1">Admin Panel</p>
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() => {
+                const current = localStorage.getItem('astro_theme') || 'dark';
+                const next = current === 'dark' ? 'light' : 'dark';
+                localStorage.setItem('astro_theme', next);
+                if (next === 'dark') {
+                  document.documentElement.classList.remove('light');
+                  document.documentElement.classList.add('dark');
+                } else {
+                  document.documentElement.classList.remove('dark');
+                  document.documentElement.classList.add('light');
+                }
+              }}
+              className="text-xs px-2 py-1 bg-slate-100 rounded text-slate-700 hover:bg-slate-200"
+            >
+              Toggle Theme
+            </button>
+            <span className="text-xs text-slate-400">(light / dark)</span>
+          </div>
         </div>
 
         {/* Navigation */}

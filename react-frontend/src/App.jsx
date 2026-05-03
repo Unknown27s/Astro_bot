@@ -13,6 +13,8 @@ import MemoryPage from './pages/admin/MemoryPage';
 import RateLimitingPage from './pages/admin/RateLimitingPage';
 import TraceMonitorPage from './pages/admin/TraceMonitorPage';
 import FaqPage from './pages/admin/FaqPage';
+import StudentDataPage from './pages/admin/StudentDataPage';
+import TimetablePage from './pages/admin/TimetablePage';
 
 function ProtectedRoute({ children, roles }) {
   const { user } = useAuth();
@@ -35,6 +37,8 @@ export default function App() {
         <Route path="/admin" element={<ProtectedRoute roles={['admin']}><AdminLayout /></ProtectedRoute>}>
           <Route index element={<Navigate to="documents" />} />
           <Route path="documents" element={<DocumentsPage />} />
+          <Route path="student-data" element={<StudentDataPage />} />
+          <Route path="timetable" element={<TimetablePage />} />
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="users" element={<UsersPage />} />
           <Route path="settings" element={<SettingsPage />} />
