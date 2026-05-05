@@ -108,17 +108,14 @@ Table: student_marks
 Columns: id, student_id, subject_code, subject_name, semester, internal_marks, external_marks, total_marks, grade, uploaded_at
 '''
 
-def upsert_unified_data(rows: list[dict], uploaded_by: str = None) -> dict:
+def upsert_unified_data(rows: list[dict], uploaded_by: str) -> int:
     """
     Process a unified upload sheet containing both student details and marks.
     Rows should have:
     - roll_no, name, email, phone, department, semester (for student)
     - subject_code, subject_name, subject_semester, internal_marks, external_marks, grade (for marks)
-
-    Returns a dict: {"students_upserted": int, "marks_inserted": int}
     """
     marks_added = 0
-    students_upserted = 0
     with get_institute_connection() as conn:
         for row in rows:
             roll_no = row.get("roll_no")
@@ -140,7 +137,6 @@ def upsert_unified_data(rows: list[dict], uploaded_by: str = None) -> dict:
                     (student_id, roll_no, row.get("name", ""), row.get("email", ""), row.get("phone", ""), 
                      row.get("department", ""), row.get("semester", 0), 0.0, _now())
                 )
-            students_upserted += 1
                 
             # 2. Insert Marks
             subject_code = row.get("subject_code")
@@ -172,4 +168,4 @@ def upsert_unified_data(rows: list[dict], uploaded_by: str = None) -> dict:
                     )
                 marks_added += 1
         conn.commit()
-    return {"students_upserted": students_upserted, "marks_inserted": marks_added}
+    return marks_added

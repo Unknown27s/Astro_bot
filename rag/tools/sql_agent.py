@@ -16,7 +16,6 @@ Flow:
 
 import json
 import logging
-from typing import Union, List, Dict
 from rag.providers.manager import get_manager
 from database.institute_db import get_schema_for_llm, execute_readonly_query
 
@@ -92,7 +91,7 @@ def execute_sql_agent(query: str, trace=None) -> str:
     logger.info(f"SQL Agent: Generated SQL: {generated_sql}")
     logger.info(f"SQL Agent: Explanation: {explanation}")
     
-    if trace and hasattr(trace, 'route_reason') and trace.route_reason is not None:
+    if trace and hasattr(trace, 'route_reason'):
         trace.route_reason += f" | SQL: {generated_sql}"
     
     # ── Step 2: Execute the SQL (read-only) ──
@@ -112,10 +111,7 @@ def execute_sql_agent(query: str, trace=None) -> str:
                 "Could you rephrase your question?"
             )
     
-    # ── Step 3: Handle empty or None results ──
-    if result is None:
-        return "A database error occurred. Please try again."
-
+    # ── Step 3: Handle empty results ──
     if not result:
         return (
             f"I searched the database but found no matching records for your question. "
@@ -154,7 +150,7 @@ def execute_sql_agent(query: str, trace=None) -> str:
         return f"I found the data but had trouble formatting the answer. Here are the raw results:\n\n{result_text}"
 
 
-def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: str, trace=None) -> Union[List[Dict], str]:
+def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: str, trace=None) -> list[dict] | str:
     """
     Retry SQL generation after a failure, feeding the error back to the LLM.
     """
@@ -187,7 +183,7 @@ def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: st
         
         logger.info(f"SQL Agent: Retry SQL: {corrected_sql}")
         
-        if trace and hasattr(trace, 'route_reason') and trace.route_reason is not None:
+        if trace and hasattr(trace, 'route_reason'):
             trace.route_reason += f" | Retry SQL: {corrected_sql}"
         
         return execute_readonly_query(corrected_sql)
@@ -201,11 +197,12 @@ def _parse_llm_json(raw: str) -> dict:
     """Parse JSON from LLM response, handling markdown code fences."""
     clean = raw.strip()
     
-    # Strip the entire opening fence line (handles ```json, ```, or any variant)
-    if clean.startswith("```"):
-        clean = clean[clean.index("\n") + 1:]
+    # Strip markdown code fences
+    if clean.startswith("```json"):
+        clean = clean[7:]
+    elif clean.startswith("```"):
+        clean = clean[3:]
     
-    # Strip trailing fence
     if clean.endswith("```"):
         clean = clean[:-3]
     
@@ -224,7 +221,7 @@ def _format_results_for_llm(rows: list[dict]) -> str:
     # Build a simple table representation
     headers = list(display_rows[0].keys())
     lines = [" | ".join(headers)]
-    lines.append("-" * 60)
+    lines.append("-" * len(lines[0]))
     
     for row in display_rows:
         lines.append(" | ".join(str(row.get(h, "")) for h in headers))
