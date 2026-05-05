@@ -292,7 +292,7 @@ You'll see three TEST MODE buttons at the bottom of the login card:
 
 **How to enable real login:**
 1. Start Spring Boot backend on port 8080
-2. Start FastAPI backend on port 8001
+2. Start FastAPI backend on port 8000
 3. Change test mode to real login
 4. Form submission will call actual API endpoints
 
@@ -300,7 +300,7 @@ You'll see three TEST MODE buttons at the bottom of the login card:
 
 ## 📈 RAGAS Evaluation (Offline)
 
-Use this to generate metrics for PPT comparison using local embeddings + Groq as the LLM judge.
+Use this to generate metrics for PPT comparison using local embeddings + NVIDIA as the LLM judge.
 
 ### Prerequisites
 - `NVIDIA_API_KEY` set in your environment
@@ -388,7 +388,7 @@ Before marking the frontend as production-ready:
 
 ---
 
-**Last Updated:** April 9, 2026
+**Last Updated:** May 2026
 
 **Frontend Version:** 2.0.0 (UI Redesign Complete)
 

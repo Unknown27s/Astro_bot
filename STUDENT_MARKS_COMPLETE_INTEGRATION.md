@@ -91,6 +91,13 @@ Go to:           Sidebar → Student Data
 
 ### Via React → Spring Boot (Recommended for Production)
 ```
+POST /api/admin/upload/students
+POST /api/admin/upload/marks
+POST /api/admin/upload/unified
+GET  /api/admin/students
+GET  /api/admin/timetables
+
+# Legacy routes still available:
 POST /api/admin/students/upload
 POST /api/admin/students/marks/upload
 ```

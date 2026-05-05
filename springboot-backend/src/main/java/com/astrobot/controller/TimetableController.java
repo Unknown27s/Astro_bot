@@ -10,25 +10,24 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * StudentMarksController - Handles student and marks data upload/management
- * Acts as proxy to Python FastAPI /api/admin/upload/* endpoints
+ * TimetableController - Handles timetable data upload
+ * Acts as proxy to Python FastAPI /api/admin/upload/timetable
  */
 @RestController
-@RequestMapping("/api/admin/students")
-public class StudentMarksController {
+@RequestMapping("/api/admin")
+public class TimetableController {
 
     private final PythonApiService pythonApi;
 
-    public StudentMarksController(PythonApiService pythonApi) {
+    public TimetableController(PythonApiService pythonApi) {
         this.pythonApi = pythonApi;
     }
 
     /**
-     * Upload student data from CSV/Excel file
-     * Expected columns: roll_no, name, email, phone, department, semester, gpa
+     * Upload timetable data from CSV/Excel file
      */
-    @PostMapping("/upload")
-    public ResponseEntity<?> uploadStudents(
+    @PostMapping("/upload/timetable")
+    public ResponseEntity<?> uploadTimetable(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
         try {
@@ -37,7 +36,7 @@ public class StudentMarksController {
                         .body(Map.of("status", "error", "message", "Only CSV and XLSX files are allowed"));
             }
 
-            Map<String, Object> result = pythonApi.uploadStudents(file, uploadedBy);
+            Map<String, Object> result = pythonApi.uploadTimetable(file, uploadedBy);
             return ResponseEntity.ok(result);
         } catch (WebClientResponseException e) {
             return ResponseEntity.status(e.getStatusCode())
@@ -49,39 +48,13 @@ public class StudentMarksController {
     }
 
     /**
-     * Upload student marks from CSV/Excel file
-     * Expected columns: roll_no, subject_code, subject_name, semester,
-     * internal_marks, external_marks, grade
+     * List timetable entries (admin/faculty only).
      */
-    @PostMapping("/marks/upload")
-    public ResponseEntity<?> uploadMarks(
-            @RequestParam("file") MultipartFile file,
-            @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
-        try {
-            if (!isValidFileType(file)) {
-                return ResponseEntity.badRequest()
-                        .body(Map.of("status", "error", "message", "Only CSV and XLSX files are allowed"));
-            }
-
-            Map<String, Object> result = pythonApi.uploadMarks(file, uploadedBy);
-            return ResponseEntity.ok(result);
-        } catch (WebClientResponseException e) {
-            return ResponseEntity.status(e.getStatusCode())
-                    .body(Map.of("status", "error", "error", e.getResponseBodyAsString()));
-        } catch (Exception e) {
-            return ResponseEntity.internalServerError()
-                    .body(Map.of("status", "error", "error", e.getMessage()));
-        }
-    }
-
-    /**
-     * List all students (admin only).
-     */
-    @GetMapping
-    public ResponseEntity<?> listStudents(
+    @GetMapping("/timetables")
+    public ResponseEntity<?> listTimetables(
             @RequestHeader(value = "X-User-ID", required = false) String userId) {
         try {
-            List<Map<String, Object>> result = pythonApi.getStudents(userId);
+            List<Map<String, Object>> result = pythonApi.getTimetables(userId);
             return ResponseEntity.ok(result);
         } catch (WebClientResponseException e) {
             return ResponseEntity.status(e.getStatusCode())

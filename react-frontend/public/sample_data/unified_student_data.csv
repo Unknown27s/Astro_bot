@@ -1,0 +1,7 @@
+roll_no,name,email,phone,department,semester,subject_code,subject_name,internal_marks,external_marks,grade
+CS001,Rahul Kumar,rahul.kumar@imsuniversity.ac.in,9876543210,Computer Science,4,CS401,Data Structures & Algorithms,18,72,A
+CS001,Rahul Kumar,rahul.kumar@imsuniversity.ac.in,9876543210,Computer Science,4,CS402,Database Management Systems,17,68,A
+CS002,Priya Singh,priya.singh@imsuniversity.ac.in,9876543211,Computer Science,4,CS401,Data Structures & Algorithms,19,78,A+
+CS002,Priya Singh,priya.singh@imsuniversity.ac.in,9876543211,Computer Science,4,CS402,Database Management Systems,18,72,A
+EC001,Neha Verma,neha.verma@imsuniversity.ac.in,9876543215,Electronics,4,EC401,Circuit Theory,16,64,B+
+EC001,Neha Verma,neha.verma@imsuniversity.ac.in,9876543215,Electronics,4,EC402,Digital Electronics,17,68,A

@@ -84,13 +84,18 @@ curl -X POST "http://localhost:8000/api/admin/upload/marks" `
 **Option B: Via Spring Boot (Production)**
 ```powershell
 # Upload students
-curl -X POST "http://localhost:8080/api/admin/students/upload" `
+curl -X POST "http://localhost:8080/api/admin/upload/students" `
   -F "file=@data/sample_data/students.csv" `
   -F "uploaded_by=admin"
 
 # Upload marks
-curl -X POST "http://localhost:8080/api/admin/students/marks/upload" `
+curl -X POST "http://localhost:8080/api/admin/upload/marks" `
   -F "file=@data/sample_data/marks.csv" `
+  -F "uploaded_by=admin"
+
+# Upload unified data (optional)
+curl -X POST "http://localhost:8080/api/admin/upload/unified" `
+  -F "file=@data/sample_data/unified_student_data.csv" `
   -F "uploaded_by=admin"
 ```
 

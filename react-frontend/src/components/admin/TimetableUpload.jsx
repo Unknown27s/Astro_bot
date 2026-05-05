@@ -21,7 +21,7 @@ export default function TimetableUpload({ userId, onUploadComplete }) {
             });
             const data = await res.json();
             if (res.ok) {
-                setStatus({ type: 'success', message: `${data.entries_added} timetable entries uploaded` });
+                setStatus({ type: 'success', message: `${data.entries_added || 'Timetable'} records uploaded` });
                 setFile(null);
                 if (onUploadComplete) onUploadComplete();
             } else {
@@ -35,30 +35,32 @@ export default function TimetableUpload({ userId, onUploadComplete }) {
     };
 
     return (
-        <div className="bg-white rounded-lg shadow p-6">
-            <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-                <Upload className="h-5 w-5" />
+        <div className="astro-glass rounded-xl border border-white/10 p-5 bg-black/10">
+            <h4 className="text-md font-semibold text-white mb-4 flex items-center gap-2">
+                <Upload className="h-4 w-4 text-indigo-400" />
                 Upload Timetable (CSV / XLSX)
-            </h3>
-            <p className="text-sm text-gray-600 mb-4">CSV/XLSX with columns: course_code, course_name, department, semester, section, day, start_time, end_time, room, instructor</p>
-            <form onSubmit={upload}>
+            </h4>
+            <p className="text-xs text-slate-400 mb-4 h-8">
+                Columns: <span className="font-mono text-[10px]">course_code, course_name, department, semester, section, day, start_time, end_time, room, instructor</span>
+            </p>
+            <form onSubmit={upload} className="space-y-4">
                 <input
                     type="file"
                     accept=".csv,.xlsx"
                     onChange={(e) => setFile(e.target.files?.[0] || null)}
                     disabled={loading}
-                    className="block w-full text-sm text-gray-500 mb-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    className="block w-full text-sm text-slate-300 file:mr-4 file:py-2.5 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-semibold file:bg-white/10 file:text-indigo-100 hover:file:bg-white/20 disabled:opacity-50"
                 />
                 <button
                     type="submit"
                     disabled={!file || loading}
-                    className="w-full bg-blue-600 text-white py-2 px-4 rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    className="w-full rounded-xl bg-gradient-to-r from-indigo-400 to-purple-500 px-4 py-2.5 text-sm font-semibold text-white transition-transform hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100 disabled:cursor-not-allowed"
                 >
                     {loading ? 'Uploading...' : 'Upload Timetable'}
                 </button>
             </form>
             {status && (
-                <div className={`mt-4 p-3 rounded flex items-center gap-2 ${status.type === 'success' ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'}`}>
+                <div className={`mt-4 p-3 rounded-xl flex items-center gap-2 text-sm border ${status.type === 'success' ? 'bg-emerald-500/10 border-emerald-500/20 text-emerald-300' : 'bg-rose-500/10 border-rose-500/20 text-rose-300'}`}>
                     {status.type === 'success' ? <Check className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
                     {status.message}
                 </div>

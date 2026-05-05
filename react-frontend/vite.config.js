@@ -5,6 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     port: 3000,
+    // Put your ngrok URL inside this array (e.g., 'your-name.ngrok-free.app')
+    allowedHosts: ['automaker-speed-unroasted.ngrok-free.dev'],
+    hmr: {
+      clientPort: 443,
+    },
     proxy: {
       '/api': {
         target: 'http://localhost:8080',

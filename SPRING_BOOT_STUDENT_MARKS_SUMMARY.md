@@ -6,8 +6,9 @@
 
 #### 1. **StudentMarksController** 
 `springboot-backend/src/main/java/com/astrobot/controller/StudentMarksController.java`
-- `POST /api/admin/students/upload` - Upload students CSV/XLSX
-- `POST /api/admin/students/marks/upload` - Upload marks CSV/XLSX
+- `POST /api/admin/students/upload` - Upload students CSV/XLSX (legacy)
+- `POST /api/admin/students/marks/upload` - Upload marks CSV/XLSX (legacy)
+- `GET /api/admin/students` - List students
 - File validation (only .csv and .xlsx)
 - Error handling and response mapping
 
@@ -15,6 +16,9 @@
 `springboot-backend/src/main/java/com/astrobot/service/PythonApiService.java`
 - Added `uploadStudents(MultipartFile, String)` 
 - Added `uploadMarks(MultipartFile, String)`
+- Added `uploadUnified(MultipartFile, String)`
+- Added `getStudents(String)`
+- Added `getTimetables(String)`
 - Both methods use WebClient to proxy to Python FastAPI
 - Proper multipart form data handling
 
@@ -244,14 +248,27 @@ Response with sources and citations
 
 ### Spring Boot Proxy
 ```
-POST /api/admin/students/upload
-  → Proxies to Python /api/admin/upload/students
+POST /api/admin/upload/students
+    → Proxies to Python /api/admin/upload/students
 
-POST /api/admin/students/marks/upload
-  → Proxies to Python /api/admin/upload/marks
+POST /api/admin/upload/marks
+    → Proxies to Python /api/admin/upload/marks
+
+POST /api/admin/upload/unified
+    → Proxies to Python /api/admin/upload/unified
+
+GET /api/admin/students
+    → Proxies to Python /api/admin/students
+
+GET /api/admin/timetables
+    → Proxies to Python /api/admin/timetables
 
 POST /api/chat
-  → Proxies to Python /api/chat
+    → Proxies to Python /api/chat
+
+Legacy routes still available:
+POST /api/admin/students/upload
+POST /api/admin/students/marks/upload
 ```
 
 ### Python FastAPI (Direct)

@@ -1,0 +1,10 @@
+{
+  "run_name": "hybrid",
+  "rows": 4,
+  "metrics": {
+    "faithfulness": NaN,
+    "answer_relevancy": 0.2256845777719454,
+    "context_precision": NaN,
+    "context_recall": 0.0
+  }
+}

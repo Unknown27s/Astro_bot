@@ -67,12 +67,19 @@ def render_chat_page():
             with st.spinner("Searching documents and generating response..."):
                 start_time = time.time()
 
-                # Step 1: Retrieve relevant chunks
+                # Step 1: Determine query route
                 route = classify_query_route(prompt)
+
+                # ── Fast Pre-Routing (Agentic Tool Selection) ──
+                if route.mode in ("timetable", "student_marks"):
+                    selected_tool = "sql_agent"
+                else:
+                    from rag.llm_router import get_tool_for_query
+                    selected_tool = get_tool_for_query(prompt)
                 
-                if route.mode == "timetable":
-                    from rag.tools.timetable_agent import execute_timetable_agent
-                    response = execute_timetable_agent(prompt)
+                if selected_tool == "sql_agent":
+                    from rag.tools.sql_agent import execute_sql_agent
+                    response = execute_sql_agent(prompt)
                     from_memory = False
                     chunks = []
                     citations = ""

@@ -326,44 +326,7 @@ def init_db() -> None:
                 FOREIGN KEY (user_id) REFERENCES users(id)
             );
 
-            CREATE TABLE IF NOT EXISTS timetables (
-                id          TEXT PRIMARY KEY,
-                class_name  TEXT NOT NULL,
-                day         TEXT NOT NULL,
-                start_time  TEXT NOT NULL,
-                end_time    TEXT NOT NULL,
-                subject     TEXT NOT NULL,
-                room        TEXT NOT NULL,
-                uploaded_by TEXT,
-                uploaded_at TEXT NOT NULL,
-                FOREIGN KEY (uploaded_by) REFERENCES users(id)
-            );
 
-            CREATE TABLE IF NOT EXISTS students (
-                id          TEXT PRIMARY KEY,
-                roll_no     TEXT UNIQUE NOT NULL,
-                name        TEXT NOT NULL,
-                email       TEXT,
-                phone       TEXT,
-                department  TEXT,
-                semester    INTEGER,
-                gpa         REAL,
-                uploaded_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS student_marks (
-                id            TEXT PRIMARY KEY,
-                student_id    TEXT NOT NULL,
-                subject_code  TEXT NOT NULL,
-                subject_name  TEXT NOT NULL,
-                semester      INTEGER,
-                internal_marks REAL,
-                external_marks REAL,
-                total_marks   REAL,
-                grade         TEXT,
-                uploaded_at   TEXT NOT NULL,
-                FOREIGN KEY (student_id) REFERENCES students(id)
-            );
 
             CREATE INDEX IF NOT EXISTS idx_conversation_memory_user
                 ON conversation_memory(user_id);
@@ -383,16 +346,7 @@ def init_db() -> None:
                 ON query_logs(user_id);
             CREATE INDEX IF NOT EXISTS idx_query_logs_created
                 ON query_logs(created_at);
-            CREATE INDEX IF NOT EXISTS idx_timetables_class
-                ON timetables(class_name);
-            CREATE INDEX IF NOT EXISTS idx_timetables_day
-                ON timetables(day);
-            CREATE INDEX IF NOT EXISTS idx_students_roll_no
-                ON students(roll_no);
-            CREATE INDEX IF NOT EXISTS idx_student_marks_student
-                ON student_marks(student_id);
-            CREATE INDEX IF NOT EXISTS idx_student_marks_subject
-                ON student_marks(subject_code);
+
 
             -- ═══════════════════════════════════════════════════════════
             -- CUSTOM OBSERVABILITY (SQLite-based tracing)

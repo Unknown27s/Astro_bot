@@ -1,0 +1,46 @@
+# Implement Ragas for RAG System Merit Analysis
+
+This plan outlines the integration of the `ragas` framework into the AstroBot testing suite to evaluate the RAG pipeline's performance using metrics like Context Precision, Context Recall, Faithfulness, and Answer Relevancy.
+
+## User Review Required
+
+> [!WARNING]
+> Ragas evaluations heavily rely on an LLM as a "judge" to score the metrics. We need to decide which LLM to use for evaluation:
+> 1. **OpenAI / Grok / Gemini (API Key required)** - Highly recommended as they are more accurate judges.
+> 2. **Local Ollama** - Slower and might have lower accuracy for complex evaluation metrics, but it's free.
+
+## Open Questions
+
+> [!IMPORTANT]
+> 1. **Evaluation Model:** Which LLM provider would you like to use for the `ragas` evaluator (OpenAI, Gemini, Grok, or local Ollama)? Do you already have an API key configured for the preferred one?
+> 2. **Evaluation Dataset:** `ragas` requires a dataset containing `question`, `ground_truth` (the expected answer). Do you have a CSV/JSON of sample test questions and their expected answers, or should I create a mock dataset based on the current context?
+> 3. **Metrics Selection:** Standard metrics are `context_precision`, `context_recall`, `faithfulness`, and `answer_relevancy`. Are there any specific metrics you want to prioritize for your merit analysis?
+
+## Proposed Changes
+
+### Requirements & Dependencies
+
+#### [MODIFY] [requirements.txt](file:///d:/Harish%20Kumar/Project/Astro_botV2/Astro_bot/requirements.txt)
+- Add `ragas` library.
+- Add `datasets` library (used by Ragas for data structures).
+
+### Testing & Evaluation Scripts
+
+#### [NEW] [test_ragas_evaluation.py](file:///d:/Harish%20Kumar/Project/Astro_botV2/Astro_bot/tests/test_ragas_evaluation.py)
+- Create a standalone evaluation script that:
+  1. Loads a test dataset (`question`, `ground_truth`).
+  2. Runs each question through the existing `rag.retriever` (to get `contexts`) and `rag.generator` (to get `answer`).
+  3. Formats the data into a HuggingFace `Dataset`.
+  4. Runs `ragas.evaluate()` using the specified metrics.
+  5. Outputs the merit analysis report as a CSV/JSON and prints a summary to the console.
+
+#### [NEW] [ragas_dataset.csv](file:///d:/Harish%20Kumar/Project/Astro_botV2/Astro_bot/tests/ragas_dataset.csv) (Optional)
+- A sample dataset template that you can fill with specific test cases.
+
+## Verification Plan
+
+### Automated Tests
+- Run `python -m pytest tests/test_ragas_evaluation.py -v` (or run it as a standalone Python script) to ensure the evaluation pipeline executes without errors.
+
+### Manual Verification
+- Review the generated metrics report to confirm that scores (e.g., faithfulness, relevancy) are being correctly calculated and exported for your project analysis.

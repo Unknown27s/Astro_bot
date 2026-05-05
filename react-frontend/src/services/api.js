@@ -10,9 +10,9 @@ const fileApi = axios.create({
   baseURL: '/api',
 });
 
-// Trace monitor endpoints currently exist on FastAPI directly.
+// Trace monitor endpoints — use same proxy path as other API calls
 const monitorApi = axios.create({
-  baseURL: import.meta.env.VITE_MONITOR_API_BASE || 'http://localhost:8000/api',
+  baseURL: import.meta.env.VITE_MONITOR_API_BASE || '/api',
   headers: { 'Content-Type': 'application/json' },
 });
 
@@ -219,5 +219,40 @@ export const toggleRateLimit = (endpoint, enabled) =>
   api.patch(`/admin/rate-limits/${endpoint}/toggle`, { enabled });
 
 export const resetRateLimits = () => api.post('/admin/rate-limits/reset');
+
+// ── Institute Data (Students, Marks, Timetables) ──
+export const uploadStudents = (file, uploadedBy) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (uploadedBy) formData.append('uploaded_by', uploadedBy);
+  return fileApi.post('/admin/upload/students', formData);
+};
+
+export const uploadMarks = (file, uploadedBy) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (uploadedBy) formData.append('uploaded_by', uploadedBy);
+  return fileApi.post('/admin/upload/marks', formData);
+};
+
+export const uploadUnifiedData = (file, uploadedBy) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (uploadedBy) formData.append('uploaded_by', uploadedBy);
+  return fileApi.post('/admin/upload/unified', formData);
+};
+
+export const uploadTimetable = (file, uploadedBy) => {
+  const formData = new FormData();
+  formData.append('file', file);
+  if (uploadedBy) formData.append('uploaded_by', uploadedBy);
+  return fileApi.post('/admin/upload/timetable', formData);
+};
+
+export const getStudents = (userId) =>
+  api.get('/admin/students', { headers: { 'X-User-ID': userId || '' } });
+
+export const getTimetables = (userId) =>
+  api.get('/admin/timetables', { headers: { 'X-User-ID': userId || '' } });
 
 export default api;

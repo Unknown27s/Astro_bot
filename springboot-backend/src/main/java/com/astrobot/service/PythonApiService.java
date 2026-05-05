@@ -227,6 +227,60 @@ public class PythonApiService {
                 .block();
     }
 
+    public Map<String, Object> uploadUnified(MultipartFile file, String uploadedBy) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("file", file.getResource());
+        if (uploadedBy != null && !uploadedBy.isEmpty()) {
+            builder.part("uploaded_by", uploadedBy);
+        }
+
+        return client.post()
+                .uri("/api/admin/upload/unified")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(builder.build()))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public List<Map<String, Object>> getStudents(String userId) {
+        return client.get()
+                .uri("/api/admin/students")
+                .header("X-User-ID", userId != null ? userId : "")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
+                .block();
+    }
+
+    public Map<String, Object> uploadTimetable(MultipartFile file, String uploadedBy) {
+        MultipartBodyBuilder builder = new MultipartBodyBuilder();
+        builder.part("file", file.getResource());
+        if (uploadedBy != null && !uploadedBy.isEmpty()) {
+            builder.part("uploaded_by", uploadedBy);
+        }
+
+        return client.post()
+                .uri("/api/admin/upload/timetable")
+                .contentType(MediaType.MULTIPART_FORM_DATA)
+                .body(BodyInserters.fromMultipartData(builder.build()))
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {
+                })
+                .block();
+    }
+
+    public List<Map<String, Object>> getTimetables(String userId) {
+        return client.get()
+                .uri("/api/admin/timetables")
+                .header("X-User-ID", userId != null ? userId : "")
+                .retrieve()
+                .bodyToMono(new ParameterizedTypeReference<List<Map<String, Object>>>() {
+                })
+                .block();
+    }
+
     // ── Users ──
 
     public List<Map<String, Object>> listUsers() {

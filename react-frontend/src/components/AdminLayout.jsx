@@ -15,10 +15,14 @@ import {
   Menu,
   X,
   Shield,
+  BookOpen,
+  Calendar,
 } from 'lucide-react';
 
 const navItems = [
   { to: '/admin/documents', icon: FileText, label: 'Documents' },
+  { to: '/admin/student-data', icon: BookOpen, label: 'Student Data' },
+  { to: '/admin/timetable', icon: Calendar, label: 'Timetable' },
   { to: '/admin/analytics', icon: BarChart3, label: 'Analytics' },
   { to: '/admin/users', icon: Users, label: 'Users' },
   { to: '/admin/settings', icon: Settings, label: 'AI Settings' },

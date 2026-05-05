@@ -67,6 +67,10 @@ from tests.config import (
 
 init_db()
 
+# Initialize the separate institute database (timetables, students, marks)
+from database.institute_db import init_institute_db
+init_institute_db()
+
 app = FastAPI(
     title="IMS AstroBot API",
     description="RAG-powered institutional AI assistant API",
@@ -91,6 +95,40 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# ── Startup Warmup ──
+@app.on_event("startup")
+async def warmup_models():
+    """Pre-load heavy ML models so the first request isn't slow."""
+    import threading
+
+    def _warmup():
+        import time
+        start = time.time()
+        logger.info("🔥 Warming up models in background...")
+
+        # 1. Embedding model (heaviest — 3-8s)
+        try:
+            from ingestion.embedder import get_embedding_model, get_collection
+            get_embedding_model()
+            get_collection()
+            logger.info("✅ Embedding model + ChromaDB ready")
+        except Exception as e:
+            logger.warning(f"⚠️ Embedding warmup failed: {e}")
+
+        # 2. LLM Provider Manager
+        try:
+            from rag.providers.manager import get_manager
+            get_manager()
+            logger.info("✅ LLM Provider Manager ready")
+        except Exception as e:
+            logger.warning(f"⚠️ Provider warmup failed: {e}")
+
+        elapsed = time.time() - start
+        logger.info(f"🚀 Warmup complete in {elapsed:.1f}s")
+
+    threading.Thread(target=_warmup, daemon=True).start()
 
 
 # ── Rate Limiting Exception Handler ──
@@ -531,15 +569,22 @@ def api_chat(req: ChatRequest, request: Request):
                 trace_id=obs_trace.trace_id,
             )
 
+        # ── Fast Pre-Routing (Agentic Tool Selection) ──
+        if route.mode in ("timetable", "student_marks"):
+            selected_tool = "sql_agent"
+        else:
+            from rag.llm_router import get_tool_for_query
+            selected_tool = get_tool_for_query(req.query)
+
         # ── Pipeline Trace (terminal transparency for jury demo) ──
         trace = PipelineTrace(query=req.query, username=req.username)
         trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
         chunks = []
         citations = ""
-        if route.mode == "timetable":
-            from rag.tools.timetable_agent import execute_timetable_agent
-            response_text = execute_timetable_agent(req.query, trace=trace)
+        if selected_tool == "sql_agent":
+            from rag.tools.sql_agent import execute_sql_agent
+            response_text = execute_sql_agent(req.query, trace=trace)
             gen_result = {"response": response_text, "from_memory": False}
         elif route.mode == "general_chat":
             # Bypass retrieval for non-institutional small-talk/general questions.
@@ -800,15 +845,22 @@ async def api_chat_stream(req: ChatRequest, request: Request):
                 yield f"data: {json.dumps({'done': True})}\n\n"
                 return
 
+            # ── Fast Pre-Routing (Agentic Tool Selection) ──
+            if route.mode in ("timetable", "student_marks"):
+                selected_tool = "sql_agent"
+            else:
+                from rag.llm_router import get_tool_for_query
+                selected_tool = get_tool_for_query(req.query)
+
             trace = PipelineTrace(query=req.query, username=req.username)
             trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
 
             chunks = []
             citations = ""
             
-            if route.mode == "timetable":
-                from rag.tools.timetable_agent import execute_timetable_agent
-                response_text = execute_timetable_agent(req.query, trace=trace)
+            if selected_tool == "sql_agent":
+                from rag.tools.sql_agent import execute_sql_agent
+                response_text = execute_sql_agent(req.query, trace=trace)
                 yield f"data: {json.dumps({'chunk': response_text, 'done': False})}\n\n"
                 yield f"data: {json.dumps({'done': True, 'citations': '', 'sources': []})}\n\n"
                 return
@@ -952,9 +1004,16 @@ def api_chat_audio(
 
         chunks = []
         citations = ""
-        if route.mode == "timetable":
-            from rag.tools.timetable_agent import execute_timetable_agent
-            response_text = execute_timetable_agent(transcribed_text, trace=trace)
+        # ── Fast Pre-Routing (Agentic Tool Selection) ──
+        if route.mode in ("timetable", "student_marks"):
+            selected_tool = "sql_agent"
+        else:
+            from rag.llm_router import get_tool_for_query
+            selected_tool = get_tool_for_query(transcribed_text)
+
+        if selected_tool == "sql_agent":
+            from rag.tools.sql_agent import execute_sql_agent
+            response_text = execute_sql_agent(transcribed_text, trace=trace)
             gen_result = {"response": response_text, "from_memory": False}
         elif route.mode == "general_chat":
             gen_result = generate_response_direct(transcribed_text, user_id=user_id)
@@ -1368,21 +1427,23 @@ def api_upload_timetable(
     if not entries:
         raise HTTPException(status_code=422, detail="No schedule entries found. Check your file format.")
 
-    from database.db import add_timetable_entry, clear_timetable
+    from database.institute_db import get_institute_connection
     try:
         # Clear existing timetable for this class to prevent duplicates
-        deleted = clear_timetable(class_name)
-        
-        for entry in entries:
-            add_timetable_entry(
-                class_name=entry["class_name"],
-                day=entry["day"],
-                start_time=entry["start_time"],
-                end_time=entry["end_time"],
-                subject=entry["subject"],
-                room=entry["room"],
-                uploaded_by=uploaded_by
-            )
+        with get_institute_connection() as conn:
+            cursor = conn.execute("DELETE FROM timetables WHERE class_name = ?", (class_name,))
+            deleted = cursor.rowcount
+            
+            import uuid
+            from datetime import datetime, timezone
+            for entry in entries:
+                conn.execute(
+                    "INSERT INTO timetables (id, class_name, day, start_time, end_time, subject, room, uploaded_by, uploaded_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), entry["class_name"], entry["day"], entry["start_time"],
+                     entry["end_time"], entry["subject"], entry["room"], uploaded_by,
+                     datetime.now(timezone.utc).isoformat())
+                )
     except Exception as e:
         logger.error(f"Database error saving timetable: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save timetable to database: {str(e)}")
@@ -1425,7 +1486,9 @@ def api_upload_students(
         raise HTTPException(status_code=400, detail="File is empty")
 
     from ingestion.student_parser import parse_students_csv
-    from database.student_db import bulk_add_students
+    from database.institute_db import get_institute_connection
+    import uuid
+    from datetime import datetime, timezone
     try:
         students_list = parse_students_csv(content, file_ext)
     except Exception as e:
@@ -1436,7 +1499,20 @@ def api_upload_students(
         raise HTTPException(status_code=422, detail="No student records found. Check your file format.")
 
     try:
-        count_added = bulk_add_students(students_list)
+        count_added = 0
+        with get_institute_connection() as conn:
+            for s in students_list:
+                try:
+                    conn.execute(
+                        "INSERT INTO students (id, roll_no, name, email, phone, department, semester, gpa, uploaded_at) "
+                        "VALUES (?,?,?,?,?,?,?,?,?)",
+                        (str(uuid.uuid4()), s.get('roll_no'), s.get('name'), s.get('email', ''), s.get('phone', ''),
+                         s.get('department', ''), s.get('semester', 0), s.get('gpa', 0.0),
+                         datetime.now(timezone.utc).isoformat())
+                    )
+                    count_added += 1
+                except Exception as e:
+                    logger.warning(f"Failed to insert student: {e}")
         return {
             "status": "success",
             "students_added": count_added,
@@ -1477,7 +1553,9 @@ def api_upload_marks(
         raise HTTPException(status_code=400, detail="File is empty")
 
     from ingestion.student_parser import parse_marks_csv
-    from database.student_db import bulk_add_student_marks
+    from database.institute_db import get_institute_connection
+    import uuid
+    from datetime import datetime, timezone
     try:
         marks_list = parse_marks_csv(content, file_ext)
     except Exception as e:
@@ -1488,7 +1566,28 @@ def api_upload_marks(
         raise HTTPException(status_code=422, detail="No marks records found. Check your file format.")
 
     try:
-        count_added = bulk_add_student_marks(marks_list)
+        count_added = 0
+        with get_institute_connection() as conn:
+            for m in marks_list:
+                try:
+                    student_id = m.get('student_id')
+                    if not student_id and m.get('roll_no'):
+                        st = conn.execute("SELECT id FROM students WHERE roll_no = ?", (m.get('roll_no'),)).fetchone()
+                        student_id = dict(st)['id'] if st else None
+                    if student_id:
+                        internal = float(m.get('internal_marks', 0.0))
+                        external = float(m.get('external_marks', 0.0))
+                        conn.execute(
+                            "INSERT INTO student_marks (id, student_id, subject_code, subject_name, semester, "
+                            "internal_marks, external_marks, total_marks, grade, uploaded_at) "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            (str(uuid.uuid4()), student_id, m.get('subject_code'), m.get('subject_name'),
+                             m.get('semester', 1), internal, external, internal + external,
+                             m.get('grade', ''), datetime.now(timezone.utc).isoformat())
+                        )
+                        count_added += 1
+                except Exception as e:
+                    logger.warning(f"Failed to insert marks: {e}")
         return {
             "status": "success",
             "marks_added": count_added,
@@ -1498,6 +1597,58 @@ def api_upload_marks(
         logger.error(f"Database error saving marks: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save marks: {str(e)}")
 
+
+@app.post("/api/admin/upload/unified")
+@limiter.limit("10/minute")
+def api_upload_unified(
+    request: Request,
+    file: UploadFile = File(...),
+    uploaded_by: Optional[str] = Form(None),
+):
+    """Upload and parse unified student+marks data (admin/faculty)."""
+    if uploaded_by:
+        conn = get_connection()
+        user = conn.execute("SELECT id, role FROM users WHERE id = ?", (uploaded_by,)).fetchone()
+        conn.close()
+
+        if not user:
+            raise HTTPException(status_code=404, detail=f"User ID {uploaded_by} not found")
+
+        if user["role"] not in ("admin", "faculty"):
+            raise HTTPException(status_code=403, detail="Only admins and faculty can upload unified data")
+
+    original_filename = file.filename or "unified.csv"
+    file_ext = Path(original_filename).suffix.lower()
+    
+    if file_ext not in (".csv", ".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .csv and .xlsx files are supported")
+
+    content = file.file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="File is empty")
+
+    from ingestion.student_parser import parse_unified_csv
+    from database.institute_db import upsert_unified_data
+    try:
+        data_list = parse_unified_csv(content, file_ext)
+    except Exception as e:
+        logger.error(f"Failed to parse unified file: {e}")
+        raise HTTPException(status_code=422, detail=f"Failed to parse unified file: {str(e)}")
+
+    if not data_list:
+        raise HTTPException(status_code=422, detail="No records found. Check your file format.")
+
+    try:
+        stats = upsert_unified_data(data_list)
+        return {
+            "status": "success",
+            "students_added_or_updated": stats["students_upserted"],
+            "marks_added": stats["marks_inserted"],
+            "total_records_processed": len(data_list),
+        }
+    except Exception as e:
+        logger.error(f"Database error saving unified data: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save unified data: {str(e)}")
 
 @app.get("/api/admin/students")
 @limiter.limit("30/minute")
@@ -1513,8 +1664,8 @@ def api_get_students(request: Request):
     finally:
         conn.close()
 
-    from database.db import get_connection as _get_conn
-    with _get_conn() as c:
+    from database.institute_db import get_institute_connection
+    with get_institute_connection() as c:
         rows = c.execute("SELECT id, roll_no, name, email, phone, department, semester, gpa, uploaded_at FROM students ORDER BY uploaded_at DESC").fetchall()
     return [dict(r) for r in rows]
 
@@ -1557,25 +1708,55 @@ def api_upload_timetable(request: Request, file: UploadFile = File(...), uploade
         raise HTTPException(status_code=422, detail="No timetable entries found. Check your file format.")
 
     # Store entries
-    from database.db import add_timetable_entry
+    from database.institute_db import get_institute_connection
+    import uuid
+    from datetime import datetime, timezone
     added = 0
     try:
-        for row in entries:
-            # Map expected fields: course_code or class_name -> class_name, subject -> course_name
-            class_name = row.get('class_name') or row.get('course_code') or row.get('course') or ''
-            subject = row.get('subject') or row.get('course_name') or row.get('subject_name') or ''
-            day = row.get('day') or ''
-            start_time = row.get('start_time') or ''
-            end_time = row.get('end_time') or ''
-            room = row.get('room') or ''
-            if not (class_name and subject and day and start_time and end_time):
-                continue
-            add_timetable_entry(class_name, day, start_time, end_time, subject, room, uploaded_by)
-            added += 1
+        with get_institute_connection() as conn:
+            for row in entries:
+                # Map expected fields: course_code or class_name -> class_name, subject -> course_name
+                class_name = row.get('class_name') or row.get('course_code') or row.get('course') or ''
+                subject = row.get('subject') or row.get('course_name') or row.get('subject_name') or ''
+                day = row.get('day') or ''
+                start_time = row.get('start_time') or ''
+                end_time = row.get('end_time') or ''
+                room = row.get('room') or ''
+                if not (class_name and subject and day and start_time and end_time):
+                    continue
+                conn.execute(
+                    "INSERT INTO timetables (id, class_name, day, start_time, end_time, subject, room, uploaded_by, uploaded_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?)",
+                    (str(uuid.uuid4()), class_name, day, start_time, end_time, subject, room, uploaded_by,
+                     datetime.now(timezone.utc).isoformat())
+                )
+                added += 1
         return {"status": "success", "entries_added": added, "total_records": len(entries)}
     except Exception as e:
         logger.error(f"Database error saving timetable: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save timetable: {str(e)}")
+
+
+@app.get("/api/admin/timetables")
+@limiter.limit("30/minute")
+def api_get_timetables(request: Request):
+    """Return list of timetable entries from institute_data.db (admin only)."""
+    user_id = get_user_id(request)
+    conn = get_connection()
+    try:
+        row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        if not row or row[0] not in ('admin', 'faculty'):
+            raise HTTPException(status_code=403, detail="Only admins and faculty can list timetables")
+    finally:
+        conn.close()
+
+    from database.institute_db import get_institute_connection
+    with get_institute_connection() as c:
+        rows = c.execute(
+            "SELECT id, class_name, day, start_time, end_time, subject, room, uploaded_by, uploaded_at "
+            "FROM timetables ORDER BY uploaded_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 @app.post("/api/documents/ingest-url")

@@ -6,28 +6,26 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.reactive.function.client.WebClientResponseException;
 
-import java.util.List;
 import java.util.Map;
 
 /**
- * StudentMarksController - Handles student and marks data upload/management
- * Acts as proxy to Python FastAPI /api/admin/upload/* endpoints
+ * AdminUploadController - Accepts legacy/admin upload paths used by React UI.
+ * Proxies to Python FastAPI /api/admin/upload/* endpoints.
  */
 @RestController
-@RequestMapping("/api/admin/students")
-public class StudentMarksController {
+@RequestMapping("/api/admin/upload")
+public class AdminUploadController {
 
     private final PythonApiService pythonApi;
 
-    public StudentMarksController(PythonApiService pythonApi) {
+    public AdminUploadController(PythonApiService pythonApi) {
         this.pythonApi = pythonApi;
     }
 
     /**
-     * Upload student data from CSV/Excel file
-     * Expected columns: roll_no, name, email, phone, department, semester, gpa
+     * Upload student data from CSV/XLSX (admin only).
      */
-    @PostMapping("/upload")
+    @PostMapping("/students")
     public ResponseEntity<?> uploadStudents(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
@@ -49,11 +47,9 @@ public class StudentMarksController {
     }
 
     /**
-     * Upload student marks from CSV/Excel file
-     * Expected columns: roll_no, subject_code, subject_name, semester,
-     * internal_marks, external_marks, grade
+     * Upload student marks from CSV/XLSX (admin/faculty).
      */
-    @PostMapping("/marks/upload")
+    @PostMapping("/marks")
     public ResponseEntity<?> uploadMarks(
             @RequestParam("file") MultipartFile file,
             @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
@@ -75,13 +71,19 @@ public class StudentMarksController {
     }
 
     /**
-     * List all students (admin only).
+     * Upload unified student + marks data (admin/faculty).
      */
-    @GetMapping
-    public ResponseEntity<?> listStudents(
-            @RequestHeader(value = "X-User-ID", required = false) String userId) {
+    @PostMapping("/unified")
+    public ResponseEntity<?> uploadUnified(
+            @RequestParam("file") MultipartFile file,
+            @RequestParam(value = "uploaded_by", required = false) String uploadedBy) {
         try {
-            List<Map<String, Object>> result = pythonApi.getStudents(userId);
+            if (!isValidFileType(file)) {
+                return ResponseEntity.badRequest()
+                        .body(Map.of("status", "error", "message", "Only CSV and XLSX files are allowed"));
+            }
+
+            Map<String, Object> result = pythonApi.uploadUnified(file, uploadedBy);
             return ResponseEntity.ok(result);
         } catch (WebClientResponseException e) {
             return ResponseEntity.status(e.getStatusCode())
@@ -92,13 +94,11 @@ public class StudentMarksController {
         }
     }
 
-    /**
-     * Validate file extension
-     */
     private boolean isValidFileType(MultipartFile file) {
         String filename = file.getOriginalFilename();
-        if (filename == null)
+        if (filename == null) {
             return false;
+        }
         return filename.endsWith(".csv") || filename.endsWith(".xlsx");
     }
 }

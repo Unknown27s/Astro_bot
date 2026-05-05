@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import StudentMarksUpload from '../../components/admin/StudentMarksUpload';
-import { BookOpen, Database, Users, TrendingUp, AlertCircle, RefreshCw } from 'lucide-react';
+import { BookOpen, Database, Users, TrendingUp, RefreshCw } from 'lucide-react';
 
 export default function StudentDataPage() {
     const { user } = useAuth();
@@ -12,12 +12,13 @@ export default function StudentDataPage() {
     const [error, setError] = useState(null);
     const [studentCount, setStudentCount] = useState(0);
 
-    // Fetch uploaded students
     const fetchStudents = async () => {
         setLoading(true);
         setError(null);
         try {
-            const response = await fetch('/api/documents');
+            const response = await fetch('/api/admin/students', {
+                headers: { 'X-User-ID': user?.id || '' },
+            });
             if (response.ok) {
                 const data = await response.json();
                 if (Array.isArray(data)) {
@@ -41,183 +42,201 @@ export default function StudentDataPage() {
         setTimeout(() => setUploadComplete(false), 3000);
         setTimeout(() => fetchStudents(), 500);
     };
-    {/* Stats Cards */ }
-    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center gap-4">
-                <div className="bg-blue-50 p-3 rounded-lg">
-                    <Users className="h-6 w-6 text-blue-600" />
-                </div>
-                <div>
-                    <p className="text-sm text-slate-600">Total Students</p>
-                    <p className="text-2xl font-bold text-slate-900">{studentCount || '0'}</p>
-                </div>
-            </div>
-        </div>
 
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center gap-4">
-                <div className="bg-green-50 p-3 rounded-lg">
-                    <TrendingUp className="h-6 w-6 text-green-600" />
-                </div>
-                <div>
-                    <p className="text-sm text-slate-600">Status</p>
-                    <p className="text-2xl font-bold text-green-600">Ready</p>
-                </div>
-            </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-slate-200 p-6">
-            <div className="flex items-center gap-4">
-                <div className="bg-purple-50 p-3 rounded-lg">
-                    <Database className="h-6 w-6 text-purple-600" />
-                </div>
-                <div>
-                    <p className="text-sm text-slate-600">System</p>
-                    <p className="text-sm font-bold text-purple-600">Connected</p>
-                </div>
-            </div>
-        </div>
-    </div>
-    {/* Students List Section */ }
-    <div className="bg-white rounded-lg border border-slate-200 p-8 mb-8">
-        <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-semibold text-slate-900">👥 Uploaded Students</h2>
-            <button
-                onClick={fetchStudents}
-                disabled={loading}
-                className="flex items-center gap-2 px-3 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
-            >
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-            </button>
-        </div>
-
-        {loading ? (
-            <div className="text-center py-8">
-                <div className="inline-block">
-                    <div className="h-8 w-8 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
-                </div>
-                <p className="text-slate-600 mt-3">Loading students...</p>
-            </div>
-        ) : studentCount > 0 ? (
-            <div>
-                <p className="text-sm text-slate-600 mb-4">Showing student records uploaded to the system</p>
-                <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b border-slate-200">
-                            <tr>
-                                <th className="px-4 py-3 text-left font-semibold text-slate-700">Roll No</th>
-                                <th className="px-4 py-3 text-left font-semibold text-slate-700">Name</th>
-                                <th className="px-4 py-3 text-left font-semibold text-slate-700">Email</th>
-                                <th className="px-4 py-3 text-left font-semibold text-slate-700">Department</th>
-                                <th className="px-4 py-3 text-left font-semibold text-slate-700">GPA</th>
-                            </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-200">
-                            {students.map((student, idx) => (
-                                <tr key={idx} className="hover:bg-slate-50 transition-colors">
-                                    <td className="px-4 py-3 text-slate-900 font-medium">
-                                        {student.roll_no || student.id?.slice(0, 6) || `STU-${idx + 1}`}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {student.name || student.filename || 'N/A'}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {student.email || '-'}
-                                    </td>
-                                    <td className="px-4 py-3 text-slate-600">
-                                        {student.department || '-'}
-                                    </td>
-                                    <td className="px-4 py-3">
-                                        <span className="px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
-                                            {student.gpa || student.chunk_count || '-'}
-                                        </span>
-                                    </td>
-                                </tr>
-                            ))}
-                        </tbody>
-                    </table>
-                </div>
-                {studentCount > 10 && (
-                    <p className="text-xs text-slate-500 mt-4">
-                        Showing 10 of {studentCount} total students
-                    </p>
-                )}
-            </div>
-        ) : (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 text-center">
-                <Users className="h-12 w-12 text-blue-400 mx-auto mb-3 opacity-50" />
-                <p className="text-slate-600">No students uploaded yet</p>
-                <p className="text-sm text-slate-500 mt-2">Upload a student CSV file above to get started</p>
-            </div>
-        )}
-    </div>
     return (
-        <div className="max-w-6xl mx-auto">
+        <div className="space-y-6">
             {/* Page Header */}
-            <div className="mb-8">
-                <div className="flex items-center gap-3 mb-2">
-                    <BookOpen className="h-8 w-8 text-purple-600" />
-                    <h1 className="text-3xl font-bold text-slate-900">Student Data Management</h1>
-                </div>
-                <p className="text-slate-600">Upload and manage student information and academic marks</p>
+            <div>
+                <h2 className="font-astro-headline text-2xl font-extrabold tracking-tight text-white flex items-center gap-3">
+                    <BookOpen className="h-7 w-7 text-cyan-400" />
+                    Student Data Management
+                </h2>
+                <p className="text-sm text-slate-300/85 mt-2">Upload and manage student information and academic marks.</p>
             </div>
 
             {/* Success Notification */}
             {uploadComplete && (
-                <div className="mb-6 p-4 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center gap-3">
-                    <div className="h-2 w-2 bg-emerald-600 rounded-full"></div>
-                    <p className="text-emerald-700 font-medium">Data uploaded successfully!</p>
+                <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-xl flex items-center gap-3">
+                    <div className="h-2 w-2 bg-emerald-400 rounded-full"></div>
+                    <p className="text-emerald-300 font-medium text-sm">Data uploaded successfully!</p>
                 </div>
             )}
 
-            {/* Info Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-                {/* Students Card */}
-                <div className="bg-white rounded-lg border border-slate-200 p-6">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Database className="h-5 w-5 text-blue-600" />
-                        <h3 className="font-semibold text-slate-900">Student Records</h3>
-                    </div>
-                    <p className="text-sm text-slate-600 mb-4">
-                        Upload CSV or XLSX files containing student information including roll number, name, contact details, department, and GPA.
-                    </p>
-                    <div className="text-xs text-slate-500 space-y-1">
-                        <p><strong>Required columns:</strong></p>
-                        <p className="font-mono">roll_no, name, email, phone, department, semester, gpa</p>
+            {/* Stats Cards */}
+            <section className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                <div className="astro-glass rounded-xl border border-white/10 p-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-blue-500/10 p-3 rounded-lg border border-blue-500/20">
+                            <Users className="h-6 w-6 text-blue-400" />
+                        </div>
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Total Students</p>
+                            <p className="mt-1 text-2xl font-bold text-white">{studentCount || '0'}</p>
+                        </div>
                     </div>
                 </div>
 
-                {/* Marks Card */}
-                <div className="bg-white rounded-lg border border-slate-200 p-6">
-                    <div className="flex items-center gap-3 mb-3">
-                        <Database className="h-5 w-5 text-green-600" />
-                        <h3 className="font-semibold text-slate-900">Student Marks</h3>
+                <div className="astro-glass rounded-xl border border-white/10 p-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-emerald-500/10 p-3 rounded-lg border border-emerald-500/20">
+                            <TrendingUp className="h-6 w-6 text-emerald-400" />
+                        </div>
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">Status</p>
+                            <p className="mt-1 text-2xl font-bold text-emerald-400">Ready</p>
+                        </div>
                     </div>
-                    <p className="text-sm text-slate-600 mb-4">
-                        Upload CSV or XLSX files containing academic marks including subject codes, internal and external marks, and grades.
+                </div>
+
+                <div className="astro-glass rounded-xl border border-white/10 p-4">
+                    <div className="flex items-center gap-4">
+                        <div className="bg-cyan-500/10 p-3 rounded-lg border border-cyan-500/20">
+                            <Database className="h-6 w-6 text-cyan-400" />
+                        </div>
+                        <div>
+                            <p className="text-xs uppercase tracking-[0.12em] text-slate-300/80">System</p>
+                            <p className="mt-1 text-sm font-bold text-cyan-400">Connected</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            {/* Info Cards */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="astro-glass rounded-xl border border-indigo-500/20 p-5 bg-indigo-500/5">
+                    <div className="flex items-center gap-3 mb-3">
+                        <Database className="h-5 w-5 text-indigo-400" />
+                        <h3 className="font-semibold text-white">Unified Upload (Recommended)</h3>
+                    </div>
+                    <p className="text-sm text-slate-300/80 mb-4">
+                        Upload a single CSV/XLSX file containing both student details and marks. The system automatically links them.
                     </p>
-                    <div className="text-xs text-slate-500 space-y-1">
+                    <div className="text-xs text-slate-400 space-y-1">
                         <p><strong>Required columns:</strong></p>
-                        <p className="font-mono">roll_no, subject_code, subject_name, semester, internal_marks, external_marks, grade</p>
+                        <p className="font-mono text-indigo-200/80">roll_no, name, email, phone, department, semester, subject_code, subject_name, subject_semester, internal_marks, external_marks, grade</p>
+                    </div>
+                    <a
+                        href="/sample_data/unified_student_data.csv"
+                        download="unified_student_data.csv"
+                        className="mt-4 inline-flex items-center text-xs font-semibold text-indigo-300 hover:text-indigo-200 transition-colors"
+                    >
+                        📥 Download Sample CSV
+                    </a>
+                </div>
+
+                <div className="astro-glass rounded-xl border border-white/10 p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                        <Database className="h-5 w-5 text-cyan-400" />
+                        <h3 className="font-semibold text-white">Student Records Only</h3>
+                    </div>
+                    <p className="text-sm text-slate-300/80 mb-4">
+                        Upload CSV/XLSX files containing student info (roll number, name, contact details, department, GPA).
+                    </p>
+                    <div className="text-xs text-slate-400 space-y-1">
+                        <p><strong>Required columns:</strong></p>
+                        <p className="font-mono text-cyan-200/80">roll_no, name, email, phone, department, semester, gpa</p>
+                    </div>
+                </div>
+
+                <div className="astro-glass rounded-xl border border-white/10 p-5">
+                    <div className="flex items-center gap-3 mb-3">
+                        <Database className="h-5 w-5 text-emerald-400" />
+                        <h3 className="font-semibold text-white">Student Marks Only</h3>
+                    </div>
+                    <p className="text-sm text-slate-300/80 mb-4">
+                        Upload CSV/XLSX files containing academic marks (subject codes, internal/external marks, grades).
+                    </p>
+                    <div className="text-xs text-slate-400 space-y-1">
+                        <p><strong>Required columns:</strong></p>
+                        <p className="font-mono text-emerald-200/80">roll_no, subject_code, subject_name, semester, internal_marks, external_marks, grade</p>
                     </div>
                 </div>
             </div>
 
             {/* Upload Component */}
-            <div className="bg-white rounded-lg border border-slate-200 p-8">
-                <h2 className="text-xl font-semibold text-slate-900 mb-6">Upload Data</h2>
-                <StudentMarksUpload
-                    userId={user?.id}
-                    onUploadComplete={handleUploadComplete}
-                />
-            </div>
+            <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
+                <StudentMarksUpload userId={user?.id} onUploadComplete={handleUploadComplete} />
+            </section>
+
+            {/* Students List Section */}
+            <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 mb-6">
+                    <h3 className="flex items-center gap-2 text-lg font-semibold text-white">👥 Uploaded Students</h3>
+                    <button
+                        onClick={fetchStudents}
+                        disabled={loading}
+                        className="inline-flex items-center gap-2 rounded-xl bg-white/5 border border-white/10 px-3 py-1.5 text-sm font-semibold text-slate-200 hover:bg-white/10 transition-colors disabled:opacity-50"
+                    >
+                        <RefreshCw className="h-4 w-4" />
+                        Refresh
+                    </button>
+                </div>
+
+                {loading ? (
+                    <div className="text-center py-8">
+                        <div className="inline-block">
+                            <div className="h-8 w-8 border-4 border-cyan-500/20 border-t-cyan-400 rounded-full animate-spin"></div>
+                        </div>
+                        <p className="text-slate-300/80 mt-3">Loading students...</p>
+                    </div>
+                ) : studentCount > 0 ? (
+                    <div>
+                        <p className="text-sm text-slate-300/80 mb-4">Showing student records uploaded to the system</p>
+                        <div className="overflow-x-auto">
+                            <table className="min-w-full text-left text-sm text-slate-100">
+                                <thead>
+                                    <tr className="border-b border-white/10 text-xs uppercase tracking-[0.12em] text-slate-300/80">
+                                        <th className="px-4 py-3 font-semibold">Roll No</th>
+                                        <th className="px-4 py-3 font-semibold">Name</th>
+                                        <th className="px-4 py-3 font-semibold">Email</th>
+                                        <th className="px-4 py-3 font-semibold">Department</th>
+                                        <th className="px-4 py-3 font-semibold">GPA</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {students.map((student, idx) => (
+                                        <tr key={idx} className="border-b border-white/10 last:border-b-0 hover:bg-white/5 transition-colors">
+                                            <td className="px-4 py-3 font-medium text-white">
+                                                {student.roll_no || '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-200/90">
+                                                {student.name || 'N/A'}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-200/90">
+                                                {student.email || '-'}
+                                            </td>
+                                            <td className="px-4 py-3 text-slate-200/90">
+                                                {student.department || '-'}
+                                            </td>
+                                            <td className="px-4 py-3">
+                                                <span className="rounded-full border border-cyan-300/25 bg-cyan-300/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.14em] text-cyan-100">
+                                                    {student.gpa || '-'}
+                                                </span>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        {studentCount > 10 && (
+                            <p className="text-xs text-slate-400 mt-4">
+                                Showing 10 of {studentCount} total students
+                            </p>
+                        )}
+                    </div>
+                ) : (
+                    <div className="bg-white/5 border border-white/10 rounded-lg p-6 text-center">
+                        <Users className="h-12 w-12 text-slate-500 mx-auto mb-3 opacity-50" />
+                        <p className="text-slate-300">No students uploaded yet</p>
+                        <p className="text-sm text-slate-400 mt-2">Upload a student CSV file above to get started</p>
+                    </div>
+                )}
+            </section>
 
             {/* Instructions */}
-            <div className="mt-8 bg-blue-50 rounded-lg border border-blue-200 p-6">
-                <h3 className="font-semibold text-blue-900 mb-3">📋 Instructions</h3>
-                <ol className="text-sm text-blue-800 space-y-2 list-decimal list-inside">
+            <section className="astro-glass bg-blue-500/5 rounded-2xl border border-blue-500/20 p-5 md:p-6">
+                <h3 className="font-semibold text-blue-300 mb-3 text-lg">📋 Instructions</h3>
+                <ol className="text-sm text-slate-300/80 space-y-2 list-decimal list-inside">
                     <li>Prepare your CSV or XLSX file with the required columns</li>
                     <li>Click <strong>"Choose File"</strong> to select your student data file</li>
                     <li>Click <strong>"Upload Students"</strong> to import the student records</li>
@@ -225,31 +244,31 @@ export default function StudentDataPage() {
                     <li>Students will be linked to marks records by roll_no automatically</li>
                     <li>Use the chat interface to query marks (e.g., "Show my marks")</li>
                 </ol>
-            </div>
+            </section>
 
             {/* Sample Data Section */}
-            <div className="mt-8 bg-slate-50 rounded-lg border border-slate-200 p-6">
-                <h3 className="font-semibold text-slate-900 mb-3">📚 Sample Data</h3>
-                <p className="text-sm text-slate-600 mb-4">
+            <section className="astro-glass rounded-2xl border border-white/10 p-5 md:p-6">
+                <h3 className="text-lg font-semibold text-white mb-3">📚 Sample Data</h3>
+                <p className="text-sm text-slate-300/80 mb-4">
                     Download sample CSV files to understand the required format:
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4">
                     <a
                         href="/sample_data/students.csv"
                         download="students.csv"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-300 to-blue-500 px-4 py-2 text-sm font-semibold text-slate-900 transition-transform hover:scale-[1.02]"
                     >
                         📥 Download students.csv
                     </a>
                     <a
                         href="/sample_data/marks.csv"
                         download="marks.csv"
-                        className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm font-medium"
+                        className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-emerald-300 to-cyan-400 px-4 py-2 text-sm font-semibold text-slate-950 transition-transform hover:scale-[1.02]"
                     >
                         📥 Download marks.csv
                     </a>
                 </div>
-            </div>
+            </section>
         </div>
     );
 }
