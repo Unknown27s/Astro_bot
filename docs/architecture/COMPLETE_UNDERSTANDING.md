@@ -251,7 +251,7 @@ The retriever (`rag/retriever.py`) implements a production-grade hybrid search c
 
 **Fusion:** Candidates from both methods are merged using a weighted score:
 ```
-hybrid_score = 0.7 × dense_score + 0.3 × BM25_score
+hybrid_score = (0.7 * dense_score) + (0.3 * BM25_score)
 ```
 A minimum score threshold (`MIN_SCORE_THRESHOLD = 0.20`) drops irrelevant chunks before returning results.
 
@@ -529,7 +529,7 @@ React mic button → POST /api/chat/audio with .webm audio blob
     ↓
 transcribe_audio(file_path)
     → get_whisper_model() [cached with @lru_cache]
-    → faster_whisper.WhisperModel (base.en, CPU, int8 quantization)
+    → faster_whisper.WhisperModel (base.en, CPU, int8 quantization — default; float16 available for GPU)
     → segments joined → plain text
     ↓
 Transcribed text fed into standard chat pipeline
@@ -739,7 +739,7 @@ Vite + React SPA:
 
 ### SQLite Main (`astrobot.db`)
 
-All application data except structured institutional data. Uses WAL mode + foreign keys for concurrency + integrity. Passwords are hashed with PBKDF2-HMAC-SHA256 + per-user salts.
+All application data except structured institutional data. Uses WAL mode with foreign keys for concurrency and integrity. Passwords are hashed with PBKDF2-HMAC-SHA256 using per-user salts.
 
 ```
 users              id (UUID), username, password_hash, password_salt, role, full_name, is_active
@@ -861,7 +861,7 @@ LLM synthesizes → "Student 21CS001 scored 45 in internal for CS201..."
 
 | Step | Operation | Time |
 |------|-----------|------|
-| Memory cache hit | Semantic match → return cached | **< 5ms** |
+| Memory cache hit | Semantic match → return cached | **< 5–10ms** |
 | Embedding query | 384-dim vector generation | 10–20ms |
 | Dense ChromaDB search | Top-20 candidates | 5–15ms |
 | BM25 keyword search | Top-40 candidates | 2–5ms |
@@ -875,7 +875,6 @@ LLM synthesizes → "Student 21CS001 scored 45 in internal for CS201..."
 | SQL Agent | Schema → SQL → execute → synthesize | 600–2000ms |
 | Database logging | SQLite write | 5–20ms |
 | **Typical local (cache miss)** | Full pipeline | **~400–900ms** |
-| **Memory cache hit** | Instant | **< 10ms** |
 
 ### Memory Usage
 
