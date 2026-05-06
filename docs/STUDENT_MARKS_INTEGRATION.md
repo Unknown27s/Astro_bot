@@ -4,6 +4,8 @@
 
 The Student Marks System has been integrated with Spring Boot proxy layer and includes sample test data. This document explains how to set up and test the integration.
 
+**Prototype login rule:** Student logins are created automatically from uploaded data. Username and password are both set to the student roll number, and the chat pipeline auto-loads that student's profile + marks into the prompt for faster answers.
+
 ## Project Structure
 
 ### Backend Components
@@ -126,6 +128,8 @@ Or via Spring Boot:
 POST http://localhost:8080/api/chat
 ```
 
+**Faculty/Admin override:** Prefix a query with `@Database` to force the SQL Agent (e.g., `@Database show marks for roll no CS001`). Students can type it, but it is ignored and treated as normal chat.
+
 ### Expected Response
 
 ```json
@@ -158,7 +162,8 @@ Response:
 {
   "status": "success",
   "students_added": 10,
-  "total_records": 10
+  "total_records": 10,
+  "student_users_created": 10
 }
 ```
 
@@ -258,6 +263,8 @@ Current implementation:
 - **Admin**: Can upload data, view all student marks
 - **Faculty**: Can upload marks, view all student marks
 - **Student**: Can query their own marks (role check in agent)
+
+Student logins are roll number-based in this prototype (username/password = roll_no), which allows auto-loading personal data in chat without asking for roll_no each time.
 
 To implement student-owned data filtering:
 1. Add `roll_no` field to `users` table

@@ -8,7 +8,7 @@ from __future__ import annotations
 import uuid
 
 from ingestion.embedder import generate_embeddings, get_chroma_client
-from tests.config import FAQ_COLLECTION, FAQ_MIN_SCORE, FAQ_TOP_K
+from config import FAQ_COLLECTION, FAQ_MIN_SCORE, FAQ_TOP_K
 
 
 def get_faq_collection():

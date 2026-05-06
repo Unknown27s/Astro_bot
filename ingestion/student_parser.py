@@ -25,7 +25,12 @@ def parse_students_csv(content: bytes, file_ext: str) -> list[dict]:
         try:
             text = content.decode('utf-8')
             reader = csv.DictReader(io.StringIO(text))
-            return [dict(row) for row in reader]
+            # Normalize headers
+            normalized_rows = []
+            for row in reader:
+                normalized_row = {str(k).lower().strip(): v for k, v in row.items()}
+                normalized_rows.append(normalized_row)
+            return normalized_rows
         except Exception as e:
             raise ValueError(f"Failed to parse CSV: {e}")
 
@@ -51,7 +56,12 @@ def parse_marks_csv(content: bytes, file_ext: str) -> list[dict]:
         try:
             text = content.decode('utf-8')
             reader = csv.DictReader(io.StringIO(text))
-            return [dict(row) for row in reader]
+            # Normalize headers
+            normalized_rows = []
+            for row in reader:
+                normalized_row = {str(k).lower().strip(): v for k, v in row.items()}
+                normalized_rows.append(normalized_row)
+            return normalized_rows
         except Exception as e:
             raise ValueError(f"Failed to parse CSV: {e}")
 
@@ -81,6 +91,11 @@ def parse_unified_csv(content: bytes, file_ext: str) -> list[dict]:
         try:
             text = content.decode('utf-8')
             reader = csv.DictReader(io.StringIO(text))
-            return [dict(row) for row in reader]
+            # Normalize headers
+            normalized_rows = []
+            for row in reader:
+                normalized_row = {str(k).lower().strip(): v for k, v in row.items()}
+                normalized_rows.append(normalized_row)
+            return normalized_rows
         except Exception as e:
             raise ValueError(f"Failed to parse CSV: {e}")

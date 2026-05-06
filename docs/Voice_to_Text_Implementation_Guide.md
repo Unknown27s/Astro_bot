@@ -56,7 +56,7 @@ When the user clicks the mic button:
 - The recorded blob is packaged as `multipart/form-data` and posted to `/api/chat/audio` through the existing API service layer.
 - The transcribed text is displayed as the user message in chat, followed by the assistant response from the standard RAG pipeline.
 
-The chat input also now uses live API-backed typing suggestions via `/api/suggestions`. The `@Announcement` command hint is shown only for `admin` and `faculty` roles, while students do not see that command hint.
+The chat input also now uses live API-backed typing suggestions via `/api/suggestions`. The `@Announcement` and `@Database` command hints are shown only for `admin` and `faculty` roles, while students do not see those command hints.
 
 ### Step 2: Spring Boot Proxying
 Since the React app communicates exclusively with the Spring Boot gateway (handling CORS and login validation), we added a new endpoint (`/api/chat/audio`) in `ChatController.java`. Spring Boot receives the audio file and safely proxies it forward to the Python FastAPI backend natively using Spring `WebClient`.

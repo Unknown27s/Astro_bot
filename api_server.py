@@ -178,6 +178,28 @@ def get_user_id(request: Request) -> str:
     return request.headers.get(HEADER_USER_ID, DEFAULT_USER_ID)
 
 
+def _get_user_info(user_id: str) -> dict | None:
+    if not user_id:
+        return None
+    conn = get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, username, role, full_name FROM users WHERE id = ?",
+            (user_id,),
+        ).fetchone()
+        return dict(row) if row else None
+    finally:
+        conn.close()
+
+
+def _build_student_context(roll_no: str) -> str | None:
+    if not roll_no:
+        return None
+    from database.student_db import build_student_context
+
+    return build_student_context(roll_no)
+
+
 @lru_cache(maxsize=1, typed=False)
 def get_all_rate_limits_cached():
     """Get all rate limit configurations with 10-second cache."""
@@ -485,12 +507,34 @@ def api_chat(req: ChatRequest, request: Request):
     from rag.pipeline_trace import PipelineTrace
 
     start_time = time.time()
-    route = _route_query(req.query)
+    raw_query = req.query or ""
+    normalized_query = raw_query.strip().lower()
+
+    user_info = _get_user_info(req.user_id)
+    user_role = user_info.get("role") if user_info else ""
+    user_username = user_info.get("username") if user_info and user_info.get("username") else req.username
+
+    student_context = None
+    if user_role == "student" and user_username:
+        student_context = _build_student_context(user_username)
+    skip_memory = bool(student_context)
+
+    db_command = False
+    effective_query = raw_query
+    if normalized_query.startswith("@database"):
+        command_text = raw_query[len("@database"):].strip()
+        if user_role in ("admin", "faculty"):
+            db_command = True
+            effective_query = command_text
+        else:
+            effective_query = command_text or raw_query
+
+    route = _route_query(effective_query)
     obs_trace = start_observation(
         name="api.chat",
         user_id=req.user_id,
         input_payload={
-            "query_preview": req.query[:200],
+            "query_preview": effective_query[:200],
             "username": req.username,
         },
         metadata={
@@ -502,20 +546,22 @@ def api_chat(req: ChatRequest, request: Request):
 
     try:
         # --- Announcement Feature Intercept ---
-        if req.query.strip().lower().startswith("@announcement"):
-            from database.db import get_connection
-            conn = get_connection()
-            user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
-            conn.close()
+        if normalized_query.startswith("@announcement"):
+            role = user_role
+            if not role:
+                conn = get_connection()
+                user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
+                conn.close()
+                role = user_row["role"] if user_row else ""
 
-            if not user_row or user_row['role'] not in ('admin', 'faculty'):
+            if role not in ("admin", "faculty"):
                 raise HTTPException(status_code=403, detail="Only faculty and admins can post announcements")
 
             # Bypass RAG AND memory cache — call LLM directly so each announcement is unique
             from rag.providers.manager import get_manager
             from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
 
-            raw_text = req.query[13:].strip()
+            raw_text = raw_query[len("@announcement"):].strip()
             announcement_prompt = (
                 "You are an institutional announcer. Please format the following raw text "
                 "into a professional, clear, and engaging announcement with suitable emojis. "
@@ -532,7 +578,7 @@ def api_chat(req: ChatRequest, request: Request):
             )
 
             if not formatted_announcement:
-                formatted_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
+                formatted_announcement = f"📢 **New Announcement**\n\n{raw_query[len('@announcement'):].strip()}"
 
             create_announcement(req.user_id, req.username, formatted_announcement)
 
@@ -551,7 +597,7 @@ def api_chat(req: ChatRequest, request: Request):
                     user_id=req.user_id,
                     username=req.username,
                     status="ok",
-                    query_preview=req.query,
+                    query_preview=raw_query,
                     response_time_ms=elapsed_ms,
                     route_mode="announcement",
                     retrieval_mode="announcement",
@@ -569,30 +615,43 @@ def api_chat(req: ChatRequest, request: Request):
                 trace_id=obs_trace.trace_id,
             )
 
+        if db_command and not effective_query:
+            raise HTTPException(status_code=400, detail="Please include a database question after @Database")
+
         # ── Fast Pre-Routing (Agentic Tool Selection) ──
-        if route.mode in ("timetable", "student_marks"):
+        if db_command or route.mode in ("timetable", "student_marks"):
             selected_tool = "sql_agent"
         else:
             from rag.llm_router import get_tool_for_query
-            selected_tool = get_tool_for_query(req.query)
+            selected_tool = get_tool_for_query(effective_query)
+            if isinstance(selected_tool, dict):
+                selected_tool = selected_tool.get("tool")
 
         # ── Pipeline Trace (terminal transparency for jury demo) ──
-        trace = PipelineTrace(query=req.query, username=req.username)
-        trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
+        trace = PipelineTrace(query=effective_query, username=req.username)
+        route_reason = route.reason
+        if db_command:
+            route_reason = f"{route_reason} | forced by @Database"
+        trace.record_route(route.mode, confidence=route.confidence, reason=route_reason)
 
         chunks = []
         citations = ""
         if selected_tool == "sql_agent":
             from rag.tools.sql_agent import execute_sql_agent
-            response_text = execute_sql_agent(req.query, trace=trace)
+            response_text = execute_sql_agent(effective_query, trace=trace, user_context=student_context)
             gen_result = {"response": response_text, "from_memory": False}
         elif route.mode == "general_chat":
             # Bypass retrieval for non-institutional small-talk/general questions.
-            gen_result = generate_response_direct(req.query, user_id=req.user_id)
+            gen_result = generate_response_direct(
+                effective_query,
+                user_id=req.user_id,
+                user_context=student_context,
+                skip_memory=skip_memory,
+            )
         else:
-            search_query = _search_query_with_history(req.user_id, req.query)
+            search_query = _search_query_with_history(req.user_id, effective_query)
             if route.mode == "faq":
-                chunks = retrieve_faq_context(req.query)
+                chunks = retrieve_faq_context(effective_query)
                 if not chunks:
                     chunks = retrieve_context(
                         search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type, 
@@ -609,10 +668,12 @@ def api_chat(req: ChatRequest, request: Request):
 
             # Step 3: Generate response (now includes memory handling)
             gen_result = generate_response(
-                req.query,
+                effective_query,
                 context,
                 user_id=req.user_id,
                 sources=[c.get("source", "") for c in chunks],
+                user_context=student_context,
+                skip_memory=skip_memory,
                 trace=trace,
                 obs_trace=obs_trace,
                 route_mode=route.memory_scope,
@@ -637,7 +698,7 @@ def api_chat(req: ChatRequest, request: Request):
         # Store turn in conversation history for follow-up support
         from rag.conversation_history import add_turn
         if response_text and req.user_id:
-            add_turn(req.user_id, req.query, response_text)
+            add_turn(req.user_id, effective_query, response_text)
 
         # Log query (but note if from memory for analytics)
         try:
@@ -649,7 +710,7 @@ def api_chat(req: ChatRequest, request: Request):
             log_query(
                 user_id=req.user_id,
                 username=req.username,
-                query_text=req.query,
+                query_text=effective_query,
                 response_text=log_response_text[:500],
                 sources=source_names,
                 response_time_ms=elapsed_ms,
@@ -667,7 +728,7 @@ def api_chat(req: ChatRequest, request: Request):
                 f"Error logging query: {str(e)}",
                 extra={
                     "user_id": req.user_id,
-                    "query": req.query[:100],
+                    "query": effective_query[:100],
                 },
                 exc_info=True,
             )
@@ -700,7 +761,7 @@ def api_chat(req: ChatRequest, request: Request):
                 user_id=req.user_id,
                 username=req.username,
                 status="ok",
-                query_preview=req.query,
+                query_preview=effective_query,
                 response_time_ms=elapsed_ms,
                 route_mode=route.mode,
                 retrieval_top_score=max(retrieval_scores) if retrieval_scores else None,
@@ -740,7 +801,7 @@ def api_chat(req: ChatRequest, request: Request):
                 user_id=req.user_id,
                 username=req.username,
                 status="http_error",
-                query_preview=req.query,
+                query_preview=effective_query,
                 response_time_ms=elapsed_ms,
                 route_mode=route.mode,
                 error_message=str(exc.detail),
@@ -763,7 +824,7 @@ def api_chat(req: ChatRequest, request: Request):
                 user_id=req.user_id,
                 username=req.username,
                 status="error",
-                query_preview=req.query,
+                query_preview=effective_query,
                 response_time_ms=elapsed_ms,
                 route_mode=route.mode,
                 error_message=str(exc),
@@ -787,32 +848,56 @@ async def api_chat_stream(req: ChatRequest, request: Request):
     import asyncio
 
     start_time = time.time()
-    route = _route_query(req.query)
+    raw_query = req.query or ""
+    normalized_query = raw_query.strip().lower()
+
+    user_info = _get_user_info(req.user_id)
+    user_role = user_info.get("role") if user_info else ""
+    user_username = user_info.get("username") if user_info and user_info.get("username") else req.username
+
+    student_context = None
+    if user_role == "student" and user_username:
+        student_context = _build_student_context(user_username)
+    skip_memory = bool(student_context)
+
+    db_command = False
+    effective_query = raw_query
+    if normalized_query.startswith("@database"):
+        command_text = raw_query[len("@database"):].strip()
+        if user_role in ("admin", "faculty"):
+            db_command = True
+            effective_query = command_text
+        else:
+            effective_query = command_text or raw_query
+
+    route = _route_query(effective_query)
     
     obs_trace = start_observation(
         name="api.chat.stream",
         user_id=req.user_id,
-        input_payload={"query_preview": req.query[:200], "username": req.username},
+        input_payload={"query_preview": effective_query[:200], "username": req.username},
         metadata={"endpoint": "/api/chat/stream", "voice": False, "route_mode": route.mode},
     )
 
     async def event_stream():
         try:
             # --- Announcement Feature Intercept ---
-            if req.query.strip().lower().startswith("@announcement"):
-                from database.db import get_connection
-                conn = get_connection()
-                user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
-                conn.close()
+            if normalized_query.startswith("@announcement"):
+                role = user_role
+                if not role:
+                    conn = get_connection()
+                    user_row = conn.execute("SELECT role FROM users WHERE id = ?", (req.user_id,)).fetchone()
+                    conn.close()
+                    role = user_row["role"] if user_row else ""
 
-                if not user_row or user_row['role'] not in ('admin', 'faculty'):
+                if role not in ("admin", "faculty"):
                     yield f"data: {json.dumps({'error': 'Only faculty and admins can post announcements'})}\n\n"
                     return
 
                 from rag.providers.manager import get_manager
                 from tests.config import SYSTEM_PROMPT, MODEL_TEMPERATURE, MODEL_MAX_TOKENS
 
-                raw_text = req.query[13:].strip()
+                raw_text = raw_query[len("@announcement"):].strip()
                 announcement_prompt = (
                     "You are an institutional announcer. Please format the following raw text "
                     "into a professional, clear, and engaging announcement with suitable emojis. "
@@ -838,39 +923,53 @@ async def api_chat_stream(req: ChatRequest, request: Request):
                         yield f"data: {json.dumps({'chunk': chunk})}\n\n"
                         await asyncio.sleep(0.01)
                 else:
-                    generated_announcement = f"📢 **New Announcement**\n\n{req.query[13:].strip()}"
+                    generated_announcement = f"📢 **New Announcement**\n\n{raw_query[len('@announcement'):].strip()}"
                     yield f"data: {json.dumps({'chunk': generated_announcement})}\n\n"
 
                 create_announcement(req.user_id, req.username, generated_announcement)
                 yield f"data: {json.dumps({'done': True})}\n\n"
                 return
 
+            if db_command and not effective_query:
+                yield f"data: {json.dumps({'error': 'Please include a database question after @Database'})}\n\n"
+                return
+
             # ── Fast Pre-Routing (Agentic Tool Selection) ──
-            if route.mode in ("timetable", "student_marks"):
+            if db_command or route.mode in ("timetable", "student_marks"):
                 selected_tool = "sql_agent"
             else:
                 from rag.llm_router import get_tool_for_query
-                selected_tool = get_tool_for_query(req.query)
+                selected_tool = get_tool_for_query(effective_query)
+                if isinstance(selected_tool, dict):
+                    selected_tool = selected_tool.get("tool")
 
-            trace = PipelineTrace(query=req.query, username=req.username)
-            trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
+            trace = PipelineTrace(query=effective_query, username=req.username)
+            route_reason = route.reason
+            if db_command:
+                route_reason = f"{route_reason} | forced by @Database"
+            trace.record_route(route.mode, confidence=route.confidence, reason=route_reason)
 
             chunks = []
             citations = ""
             
             if selected_tool == "sql_agent":
                 from rag.tools.sql_agent import execute_sql_agent
-                response_text = execute_sql_agent(req.query, trace=trace)
+                response_text = execute_sql_agent(effective_query, trace=trace, user_context=student_context)
                 yield f"data: {json.dumps({'chunk': response_text, 'done': False})}\n\n"
                 yield f"data: {json.dumps({'done': True, 'citations': '', 'sources': []})}\n\n"
                 return
 
             elif route.mode == "general_chat":
-                gen_stream = generate_response_direct_stream(req.query, user_id=req.user_id)
+                gen_stream = generate_response_direct_stream(
+                    effective_query,
+                    user_id=req.user_id,
+                    user_context=student_context,
+                    skip_memory=skip_memory,
+                )
             else:
-                search_query = _search_query_with_history(req.user_id, req.query)
+                search_query = _search_query_with_history(req.user_id, effective_query)
                 if route.mode == "faq":
-                    chunks = retrieve_faq_context(req.query)
+                    chunks = retrieve_faq_context(effective_query)
                     if not chunks:
                         chunks = retrieve_context(
                             search_query, trace=trace, obs_trace=obs_trace, source_type=route.source_type, 
@@ -884,10 +983,12 @@ async def api_chat_stream(req: ChatRequest, request: Request):
 
                 context = format_context_for_llm(chunks)
                 gen_stream = generate_response_stream(
-                    req.query,
+                    effective_query,
                     context,
                     user_id=req.user_id,
                     sources=[c.get("source", "") for c in chunks],
+                    user_context=student_context,
+                    skip_memory=skip_memory,
                     trace=trace,
                     obs_trace=obs_trace,
                     route_mode=route.memory_scope,
@@ -918,7 +1019,7 @@ async def api_chat_stream(req: ChatRequest, request: Request):
             
             elapsed_ms = (time.time() - start_time) * 1000
             if full_response and req.user_id:
-                add_turn(req.user_id, req.query, full_response)
+                add_turn(req.user_id, effective_query, full_response)
                 
             try:
                 source_names = ", ".join([c.get("source", "") for c in chunks[:3]])
@@ -926,7 +1027,7 @@ async def api_chat_stream(req: ChatRequest, request: Request):
                 log_query(
                     user_id=req.user_id,
                     username=req.username,
-                    query_text=req.query,
+                    query_text=effective_query,
                     response_text=log_response_text[:500],
                     sources=source_names,
                     response_time_ms=elapsed_ms,
@@ -998,6 +1099,15 @@ def api_chat_audio(
         logger.info(f"User {username} spoke: {transcribed_text}")
         route = _route_query(transcribed_text)
 
+        user_info = _get_user_info(user_id)
+        user_role = user_info.get("role") if user_info else ""
+        user_username = user_info.get("username") if user_info and user_info.get("username") else username
+
+        student_context = None
+        if user_role == "student" and user_username:
+            student_context = _build_student_context(user_username)
+        skip_memory = bool(student_context)
+
         # ── Pipeline Trace (terminal transparency for jury demo) ──
         trace = PipelineTrace(query=f"[🎤 VOICE] {transcribed_text}", username=username)
         trace.record_route(route.mode, confidence=route.confidence, reason=route.reason)
@@ -1010,13 +1120,20 @@ def api_chat_audio(
         else:
             from rag.llm_router import get_tool_for_query
             selected_tool = get_tool_for_query(transcribed_text)
+            if isinstance(selected_tool, dict):
+                selected_tool = selected_tool.get("tool")
 
         if selected_tool == "sql_agent":
             from rag.tools.sql_agent import execute_sql_agent
-            response_text = execute_sql_agent(transcribed_text, trace=trace)
+            response_text = execute_sql_agent(transcribed_text, trace=trace, user_context=student_context)
             gen_result = {"response": response_text, "from_memory": False}
         elif route.mode == "general_chat":
-            gen_result = generate_response_direct(transcribed_text, user_id=user_id)
+            gen_result = generate_response_direct(
+                transcribed_text,
+                user_id=user_id,
+                user_context=student_context,
+                skip_memory=skip_memory,
+            )
         else:
             search_query = _search_query_with_history(user_id, transcribed_text)
             if route.mode == "faq":
@@ -1038,6 +1155,8 @@ def api_chat_audio(
                 context,
                 user_id=user_id,
                 sources=[c.get("source", "") for c in chunks],
+                user_context=student_context,
+                skip_memory=skip_memory,
                 trace=trace,
                 obs_trace=obs_trace,
                 route_mode=route.memory_scope,
@@ -1487,6 +1606,7 @@ def api_upload_students(
 
     from ingestion.student_parser import parse_students_csv
     from database.institute_db import get_institute_connection
+    from database.db import create_user
     import uuid
     from datetime import datetime, timezone
     try:
@@ -1500,23 +1620,32 @@ def api_upload_students(
 
     try:
         count_added = 0
+        users_created = 0
+        seen_roll_nos: set[str] = set()
         with get_institute_connection() as conn:
             for s in students_list:
                 try:
+                    roll_no = s.get("roll_no")
                     conn.execute(
                         "INSERT INTO students (id, roll_no, name, email, phone, department, semester, gpa, uploaded_at) "
                         "VALUES (?,?,?,?,?,?,?,?,?)",
-                        (str(uuid.uuid4()), s.get('roll_no'), s.get('name'), s.get('email', ''), s.get('phone', ''),
+                        (str(uuid.uuid4()), roll_no, s.get('name'), s.get('email', ''), s.get('phone', ''),
                          s.get('department', ''), s.get('semester', 0), s.get('gpa', 0.0),
                          datetime.now(timezone.utc).isoformat())
                     )
                     count_added += 1
+
+                    if roll_no and roll_no not in seen_roll_nos:
+                        seen_roll_nos.add(roll_no)
+                        if create_user(roll_no, roll_no, "student", s.get("name", "") or ""):
+                            users_created += 1
                 except Exception as e:
                     logger.warning(f"Failed to insert student: {e}")
         return {
             "status": "success",
             "students_added": count_added,
             "total_records": len(students_list),
+            "student_users_created": users_created,
         }
     except Exception as e:
         logger.error(f"Database error saving students: {e}")
@@ -1629,6 +1758,7 @@ def api_upload_unified(
 
     from ingestion.student_parser import parse_unified_csv
     from database.institute_db import upsert_unified_data
+    from database.db import create_user
     try:
         data_list = parse_unified_csv(content, file_ext)
     except Exception as e:
@@ -1640,11 +1770,22 @@ def api_upload_unified(
 
     try:
         stats = upsert_unified_data(data_list)
+
+        users_created = 0
+        seen_roll_nos: set[str] = set()
+        for row in data_list:
+            roll_no = row.get("roll_no")
+            if not roll_no or roll_no in seen_roll_nos:
+                continue
+            seen_roll_nos.add(roll_no)
+            if create_user(roll_no, roll_no, "student", row.get("name", "") or ""):
+                users_created += 1
         return {
             "status": "success",
             "students_added_or_updated": stats["students_upserted"],
             "marks_added": stats["marks_inserted"],
             "total_records_processed": len(data_list),
+            "student_users_created": users_created,
         }
     except Exception as e:
         logger.error(f"Database error saving unified data: {e}")
@@ -1672,7 +1813,7 @@ def api_get_students(request: Request):
 
 @app.post("/api/admin/upload/timetable")
 @limiter.limit("10/minute")
-def api_upload_timetable(request: Request, file: UploadFile = File(...), uploaded_by: Optional[str] = Form(None)):
+def api_upload_timetable_legacy(request: Request, file: UploadFile = File(...), uploaded_by: Optional[str] = Form(None)):
     """Upload CSV/XLSX timetable and store entries.
     Admin-only.
     """

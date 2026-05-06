@@ -353,6 +353,8 @@ llm_router.get_tool_for_query()  [<1ms, keyword check]
                     └─ unclear       → Document ChromaDB
 ```
 
+**Forced Database Mode:** Faculty/Admin users can prefix a query with `@Database` to bypass routing and force the SQL Agent for timetable/marks lookups. Students can type it, but the prefix is ignored and treated as a normal query.
+
 ---
 
 ## 🔧 Component Deep Dive
@@ -478,6 +480,8 @@ Configuration knobs:
 - `CONV_MATCH_THRESHOLD` — similarity threshold (default 0.88)
 - `CONV_PER_USER` — separate memory per user or shared global memory
 - `CONV_TTL_DAYS` — expiry (default 90 days)
+
+**Student safety:** When student profile/marks context is injected into a prompt, the response bypasses the semantic cache to avoid cross-user leakage if global memory is enabled.
 
 ### SQL Agent (`rag/tools/sql_agent.py`)
 
@@ -1033,6 +1037,8 @@ LLM synthesizes → "Student 21CS001 scored 45 in internal for CS201..."
    - LLM: "CCE-A has Mathematics at 9:00 AM in Room 301..."
 4. Student sees formatted timetable
 ```
+
+**Student login mapping:** For the prototype, student logins are created from uploaded roll numbers. Username/password are set to the roll number, and student profile + marks are auto-loaded into the prompt when available.
 
 ### Workflow 4: Admin Troubleshooting
 

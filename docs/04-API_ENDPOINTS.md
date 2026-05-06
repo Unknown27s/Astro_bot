@@ -482,6 +482,8 @@ curl http://localhost:8000/api/documents | jq
 
 **Note:** `@Announcement` still bypasses normal routing and formats the message for the announcements feed.
 
+**Note:** `@Database` forces the SQL Agent for timetable/marks queries (Admin/Faculty only). Students can type it, but it is ignored and treated as normal chat.
+
 ---
 
 ### Send Chat Query (Streaming)
@@ -618,8 +620,9 @@ curl http://localhost:8000/api/announcements | jq
 
 ### Frontend Role Hint Behavior
 
-- Typing suggestion for `@Announcement` is shown only to `admin` and `faculty` users in the React chat UI.
-- Students do not see the `@Announcement` command hint and receive HTTP 403 if they try to post one manually.
+- Typing suggestion for `@Announcement` and `@Database` is shown only to `admin` and `faculty` users in the React chat UI.
+- Students do not see those command hints and receive HTTP 403 if they try to post `@Announcement` manually.
+- The Spring Boot `/api/suggestions` proxy now forwards `user_role` and can return `command_suggestions` for `@Announcement` / `@Database` when the role is allowed.
 
 ---
 

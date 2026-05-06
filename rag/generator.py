@@ -96,6 +96,8 @@ def generate_response(
     context: str,
     user_id: Optional[str] = None,
     sources: Optional[list] = None,
+    user_context: Optional[str] = None,
+    skip_memory: bool = False,
     trace=None,
     obs_trace=None,
     route_mode: Optional[str] = None,
@@ -131,27 +133,28 @@ def generate_response(
             pass
 
     # Step 1: Check conversation memory
-    memory_result = _check_memory(query, user_id)
-    if memory_result:
-        elapsed = (time.time() - start_time) * 1000
-        logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
-        if obs_span:
-            try:
-                obs_span.end(
-                    output={"response_length": len(memory_result["response"])},
-                    metadata={
-                        "from_memory": True,
-                        "elapsed_ms": round(elapsed, 2),
-                        "tokens_output": _estimate_tokens(memory_result["response"]),
-                    }
-                )
-            except Exception:
-                pass
-        return {
-            "response": memory_result["response"],
-            "from_memory": True,
-            "memory_id": memory_result.get("memory_id"),
-        }
+    if not skip_memory:
+        memory_result = _check_memory(query, user_id)
+        if memory_result:
+            elapsed = (time.time() - start_time) * 1000
+            logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
+            if obs_span:
+                try:
+                    obs_span.end(
+                        output={"response_length": len(memory_result["response"])},
+                        metadata={
+                            "from_memory": True,
+                            "elapsed_ms": round(elapsed, 2),
+                            "tokens_output": _estimate_tokens(memory_result["response"]),
+                        }
+                    )
+                except Exception:
+                    pass
+            return {
+                "response": memory_result["response"],
+                "from_memory": True,
+                "memory_id": memory_result.get("memory_id"),
+            }
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
@@ -161,6 +164,12 @@ def generate_response(
         f"CONTEXT:\n{context}\n\n"
         f"QUESTION: {query}"
     )
+    if user_context:
+        user_message = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n"
+            + user_message
+        )
 
     logger.debug(f"Generating response for query: {query[:100]}...")
     gen_start = time.time()
@@ -197,7 +206,9 @@ def generate_response(
             pass
 
     # Step 5: Store in memory and always return the result
-    memory_id = _store_memory(query, result, sources or [], user_id)
+    memory_id = None
+    if not skip_memory:
+        memory_id = _store_memory(query, result, sources or [], user_id)
     return {
         "response": result,
         "from_memory": False,
@@ -210,6 +221,8 @@ def generate_response_stream(
     context: str,
     user_id: Optional[str] = None,
     sources: Optional[list] = None,
+    user_context: Optional[str] = None,
+    skip_memory: bool = False,
     trace=None,
     obs_trace=None,
     route_mode: Optional[str] = None,
@@ -222,15 +235,16 @@ def generate_response_stream(
     start_time = time.time()
 
     # Step 1: Check conversation memory
-    memory_result = _check_memory(query, user_id)
-    if memory_result:
-        yield {
-            "chunk": memory_result["response"],
-            "from_memory": True,
-            "memory_id": memory_result.get("memory_id"),
-            "done": True,
-        }
-        return
+    if not skip_memory:
+        memory_result = _check_memory(query, user_id)
+        if memory_result:
+            yield {
+                "chunk": memory_result["response"],
+                "from_memory": True,
+                "memory_id": memory_result.get("memory_id"),
+                "done": True,
+            }
+            return
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
@@ -240,6 +254,12 @@ def generate_response_stream(
         f"CONTEXT:\n{context}\n\n"
         f"QUESTION: {query}"
     )
+    if user_context:
+        user_message = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n"
+            + user_message
+        )
 
     full_response = ""
     stream = mgr.generate_stream(
@@ -266,7 +286,9 @@ def generate_response_stream(
                 "done": False,
             }
         
-        memory_id = _store_memory(query, full_response, sources or [], user_id)
+        memory_id = None
+        if not skip_memory:
+            memory_id = _store_memory(query, full_response, sources or [], user_id)
         yield {
             "chunk": "",
             "from_memory": False,
@@ -279,6 +301,8 @@ def generate_response_stream(
 def generate_response_direct(
     query: str,
     user_id: Optional[str] = None,
+    user_context: Optional[str] = None,
+    skip_memory: bool = False,
     trace=None,
     obs_trace=None,
     route_mode: Optional[str] = None,
@@ -292,15 +316,16 @@ def generate_response_direct(
     start_time = time.time()
 
     # Step 1: Check conversation memory
-    memory_result = _check_memory(query, user_id, label="direct")
-    if memory_result:
-        elapsed = (time.time() - start_time) * 1000
-        logger.info(f"Direct mode memory cache hit - returned in {elapsed:.1f}ms")
-        return {
-            "response": memory_result["response"],
-            "from_memory": True,
-            "memory_id": memory_result.get("memory_id"),
-        }
+    if not skip_memory:
+        memory_result = _check_memory(query, user_id, label="direct")
+        if memory_result:
+            elapsed = (time.time() - start_time) * 1000
+            logger.info(f"Direct mode memory cache hit - returned in {elapsed:.1f}ms")
+            return {
+                "response": memory_result["response"],
+                "from_memory": True,
+                "memory_id": memory_result.get("memory_id"),
+            }
 
     # Step 2: Generate response
     mgr = get_manager()
@@ -309,6 +334,12 @@ def generate_response_direct(
         "If the question is about IMS/RIT institution details, mention that official documents may provide the most accurate answer.\n\n"
         f"USER QUESTION: {query}"
     )
+    if user_context:
+        direct_prompt = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n"
+            + direct_prompt
+        )
 
     result = mgr.generate(
         system_prompt=SYSTEM_PROMPT,
@@ -321,7 +352,9 @@ def generate_response_direct(
         result = "I am unable to generate a response right now. Please try again in a moment."
 
     # Step 3: Store in memory and always return the result
-    memory_id = _store_memory(query, result, [], user_id, label="direct")
+    memory_id = None
+    if not skip_memory:
+        memory_id = _store_memory(query, result, [], user_id, label="direct")
     return {
         "response": result,
         "from_memory": False,
@@ -332,6 +365,8 @@ def generate_response_direct(
 def generate_response_direct_stream(
     query: str,
     user_id: Optional[str] = None,
+    user_context: Optional[str] = None,
+    skip_memory: bool = False,
     trace=None,
     obs_trace=None,
     route_mode: Optional[str] = None,
@@ -343,15 +378,16 @@ def generate_response_direct_stream(
     start_time = time.time()
 
     # Step 1: Check conversation memory
-    memory_result = _check_memory(query, user_id, label="direct")
-    if memory_result:
-        yield {
-            "chunk": memory_result["response"],
-            "from_memory": True,
-            "memory_id": memory_result.get("memory_id"),
-            "done": True,
-        }
-        return
+    if not skip_memory:
+        memory_result = _check_memory(query, user_id, label="direct")
+        if memory_result:
+            yield {
+                "chunk": memory_result["response"],
+                "from_memory": True,
+                "memory_id": memory_result.get("memory_id"),
+                "done": True,
+            }
+            return
 
     # Step 2: Generate response
     mgr = get_manager()
@@ -360,6 +396,12 @@ def generate_response_direct_stream(
         "If the question is about IMS/RIT institution details, mention that official documents may provide the most accurate answer.\n\n"
         f"USER QUESTION: {query}"
     )
+    if user_context:
+        direct_prompt = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n"
+            + direct_prompt
+        )
 
     full_response = ""
     stream = mgr.generate_stream(
@@ -385,7 +427,9 @@ def generate_response_direct_stream(
                 "done": False,
             }
 
-        memory_id = _store_memory(query, full_response, [], user_id, label="direct")
+        memory_id = None
+        if not skip_memory:
+            memory_id = _store_memory(query, full_response, [], user_id, label="direct")
         yield {
             "chunk": "",
             "from_memory": False,

@@ -67,12 +67,12 @@ export const streamChat = (query, userId, username, { onChunk, onDone, onError }
           if (trimmedLine.startsWith('data:')) {
             try {
               // Extract JSON content, handling both 'data: ' and 'data:'
-              const jsonStr = trimmedLine.startsWith('data: ') 
-                ? trimmedLine.slice(6) 
+              const jsonStr = trimmedLine.startsWith('data: ')
+                ? trimmedLine.slice(6)
                 : trimmedLine.slice(5);
-              
+
               if (!jsonStr) continue;
-              
+
               const data = JSON.parse(jsonStr);
               if (data.error) {
                 onError?.(new Error(data.error));
@@ -119,8 +119,8 @@ export const deleteAnnouncement = (id, userId, userRole) =>
   api.delete(`/announcements/${id}`, { headers: { 'X-User-ID': userId, 'X-User-Role': userRole } });
 
 // ── Suggestions / Autocomplete ──
-export const getSuggestions = (query, userId) =>
-  api.get('/suggestions', { params: { q: query, user_id: userId } });
+export const getSuggestions = (query, userId, userRole) =>
+  api.get('/suggestions', { params: { q: query, user_id: userId, user_role: userRole } });
 
 export const submitFeedback = (traceId, rating, userId, comment = '') =>
   api.post('/feedback', { trace_id: traceId, rating, user_id: userId, comment });

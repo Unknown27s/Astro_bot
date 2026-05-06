@@ -10,7 +10,7 @@ from typing import Any
 import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
-from tests.config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
+from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
 

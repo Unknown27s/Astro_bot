@@ -126,7 +126,7 @@ public class PythonApiService {
 
     // ── Suggestions ──
 
-    public Map<String, Object> getSuggestions(String query, String userId) {
+    public Map<String, Object> getSuggestions(String query, String userId, String userRole) {
         return client.get()
                 .uri(uriBuilder -> {
                     uriBuilder.path("/api/suggestions");
@@ -135,6 +135,9 @@ public class PythonApiService {
                     }
                     if (userId != null && !userId.isEmpty()) {
                         uriBuilder.queryParam("user_id", userId);
+                    }
+                    if (userRole != null && !userRole.isEmpty()) {
+                        uriBuilder.queryParam("user_role", userRole);
                     }
                     return uriBuilder.build();
                 })

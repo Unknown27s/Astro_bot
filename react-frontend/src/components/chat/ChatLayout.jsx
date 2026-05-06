@@ -29,7 +29,7 @@ const STREAM_WAITING_TEXTS = [
 ];
 const isStreamWaitingText = (value) => STREAM_WAITING_TEXTS.includes(value);
 
-const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
+const mergeSuggestionGroups = (result, includeAnnouncementCommand, includeDatabaseCommand, query) => {
   const items = [];
   const seen = new Set();
 
@@ -49,6 +49,7 @@ const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
   appendGroup(result?.popular, 'Popular');
   appendGroup(result?.document_based, 'From Uploaded Docs');
   appendGroup(result?.preset, 'Suggested');
+  appendGroup(result?.command_suggestions, 'Faculty/Admin Command');
 
   const normalizedQuery = query.trim().toLowerCase();
   const showAnnouncementCommand =
@@ -56,9 +57,21 @@ const mergeSuggestionGroups = (result, includeAnnouncementCommand, query) => {
     normalizedQuery.length > 0 &&
     (normalizedQuery.startsWith('@') || '@announcement'.startsWith(normalizedQuery) || normalizedQuery.includes('announce'));
 
+  const showDatabaseCommand =
+    includeDatabaseCommand &&
+    normalizedQuery.length > 0 &&
+    (normalizedQuery.startsWith('@') || '@database'.startsWith(normalizedQuery) || normalizedQuery.includes('database'));
+
   if (showAnnouncementCommand && !seen.has('@announcement')) {
     items.unshift({
       text: '@Announcement ',
+      category: 'Faculty/Admin Command',
+    });
+  }
+
+  if (showDatabaseCommand && !seen.has('@database')) {
+    items.unshift({
+      text: '@Database ',
       category: 'Faculty/Admin Command',
     });
   }
@@ -107,6 +120,7 @@ export default function ChatLayout() {
   }, [user]);
 
   const canUseAnnouncementCommand = currentUser.role === 'admin' || currentUser.role === 'faculty';
+  const canUseDatabaseCommand = currentUser.role === 'admin' || currentUser.role === 'faculty';
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -208,19 +222,19 @@ export default function ChatLayout() {
 
     const timer = setTimeout(async () => {
       try {
-        const result = await getSuggestions(query, currentUser.id);
+        const result = await getSuggestions(query, currentUser.id, currentUser.role);
         if (requestId !== suggestionsRequestIdRef.current) return;
         setLiveSuggestions(
-          mergeSuggestionGroups(result.data, canUseAnnouncementCommand, query)
+          mergeSuggestionGroups(result.data, canUseAnnouncementCommand, canUseDatabaseCommand, query)
         );
       } catch (error) {
         if (requestId !== suggestionsRequestIdRef.current) return;
-        setLiveSuggestions(mergeSuggestionGroups({}, canUseAnnouncementCommand, query));
+        setLiveSuggestions(mergeSuggestionGroups({}, canUseAnnouncementCommand, canUseDatabaseCommand, query));
       }
     }, 220);
 
     return () => clearTimeout(timer);
-  }, [inputText, activeView, currentUser.id, canUseAnnouncementCommand]);
+  }, [inputText, activeView, currentUser.id, currentUser.role, canUseAnnouncementCommand, canUseDatabaseCommand]);
 
   const saveConversationTurn = (userMsg, botMsg, conversationTitleSeed) => {
     if (!currentConversationId) {

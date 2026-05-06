@@ -27,7 +27,7 @@ SQL_GENERATION_PROMPT = """You are an expert SQL query generator for an educatio
 You will be given the database schema and a user's question. Write a SQLite-compatible SELECT query to answer it.
 
 RULES:
-1. Output ONLY a valid JSON object: {"sql": "YOUR SELECT QUERY HERE", "explanation": "brief reason"}
+1. Output ONLY a valid JSON object: {{"sql": "YOUR SELECT QUERY HERE", "explanation": "brief reason"}}
 2. Use ONLY SELECT statements. No INSERT, UPDATE, DELETE, DROP, ALTER, or CREATE.
 3. Use LIKE with % wildcards for flexible text matching (e.g., class_name LIKE '%CCE%').
 4. Use case-insensitive matching: LOWER(column) LIKE LOWER('%value%').
@@ -47,7 +47,7 @@ If the results are empty, say so politely. Format tables using markdown when app
 Be concise but thorough."""
 
 
-def execute_sql_agent(query: str, trace=None) -> str:
+def execute_sql_agent(query: str, trace=None, user_context: str | None = None) -> str:
     """
     Unified Text-to-SQL agent.
     
@@ -65,11 +65,15 @@ def execute_sql_agent(query: str, trace=None) -> str:
     logger.info(f"SQL Agent: Generating query for: {query[:100]}")
     
     sql_prompt = SQL_GENERATION_PROMPT.format(schema=schema)
+
+    user_message = f"User question: {query}"
+    if user_context:
+        user_message = f"STUDENT CONTEXT:\n{user_context}\n\n{user_message}"
     
     try:
         sql_response = mgr.generate(
             system_prompt=sql_prompt,
-            user_message=f"User question: {query}",
+            user_message=user_message,
             temperature=0.0,
             max_tokens=300
         )
@@ -101,7 +105,7 @@ def execute_sql_agent(query: str, trace=None) -> str:
     # ── Step 2b: Retry on error ──
     if isinstance(result, str) and result.startswith(("Error:", "Database Error:")):
         logger.warning(f"SQL Agent: First attempt failed: {result}")
-        result = _retry_sql(mgr, schema, query, generated_sql, result, trace)
+        result = _retry_sql(mgr, schema, query, generated_sql, result, trace, user_context=user_context)
         
         # If retry also failed, return the error message
         if isinstance(result, str) and result.startswith(("Error:", "Database Error:")):
@@ -154,12 +158,20 @@ def execute_sql_agent(query: str, trace=None) -> str:
         return f"I found the data but had trouble formatting the answer. Here are the raw results:\n\n{result_text}"
 
 
-def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: str, trace=None) -> Union[List[Dict], str]:
+def _retry_sql(
+    mgr,
+    schema: str,
+    user_query: str,
+    failed_sql: str,
+    error_msg: str,
+    trace=None,
+    user_context: str | None = None,
+) -> Union[List[Dict], str]:
     """
     Retry SQL generation after a failure, feeding the error back to the LLM.
     """
     logger.info("SQL Agent: Retrying with error feedback...")
-    
+
     retry_prompt = (
         f"Your previous SQL query failed. Fix it.\n\n"
         f"PREVIOUS SQL: {failed_sql}\n"
@@ -167,7 +179,9 @@ def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: st
         f"Original user question: {user_query}\n\n"
         f"Output ONLY a valid JSON object: {{\"sql\": \"CORRECTED SELECT QUERY\", \"explanation\": \"what you fixed\"}}"
     )
-    
+    if user_context:
+        retry_prompt = f"STUDENT CONTEXT:\n{user_context}\n\n" + retry_prompt
+
     try:
         retry_response = mgr.generate(
             system_prompt=SQL_GENERATION_PROMPT.format(schema=schema),
@@ -175,23 +189,23 @@ def _retry_sql(mgr, schema: str, user_query: str, failed_sql: str, error_msg: st
             temperature=0.0,
             max_tokens=300
         )
-        
+
         if not retry_response:
             return error_msg
-        
+
         retry_json = _parse_llm_json(retry_response)
         corrected_sql = retry_json.get("sql", "")
-        
+
         if not corrected_sql:
             return error_msg
-        
+
         logger.info(f"SQL Agent: Retry SQL: {corrected_sql}")
-        
+
         if trace and hasattr(trace, 'route_reason') and trace.route_reason is not None:
             trace.route_reason += f" | Retry SQL: {corrected_sql}"
-        
+
         return execute_readonly_query(corrected_sql)
-        
+
     except Exception as e:
         logger.error(f"SQL Agent: Retry failed: {e}")
         return error_msg
