@@ -1,17 +1,37 @@
-"""
-Unified Text-to-SQL Agent for AstroBot.
+"""rag.tools.sql_agent
+======================
 
-Instead of hardcoded parameter extraction, this agent lets the LLM
-dynamically write SQL queries against the institute_data.db database.
-It handles timetable, student info, and marks queries through a single
-intelligent agent.
+Unified Text-to-SQL agent for AstroBot.
 
-Flow:
-  1. Inject the database schema into the LLM prompt.
-  2. LLM writes a SELECT query based on the user's natural language question.
-  3. Execute the query via a read-only connection (security enforced).
-  4. Feed results back to LLM for a natural language answer.
-  5. If SQL fails, retry once with the error message for self-correction.
+This module allows the LLM to generate read-only SQLite `SELECT` queries
+against the institute database to answer timetable, student info, and
+marks questions. Basic flow:
+
+    1. Inject the DB schema into the LLM prompt.
+    2. Ask the LLM to output a JSON object containing a `sql` SELECT query.
+    3. Execute the query using a read-only connection and collect results.
+    4. Synthesize a natural-language response from the result set.
+    5. On SQL errors, attempt one self-correcting retry using error feedback.
+
+Integration & observability
+---------------------------
+
+- Routed via the FastAPI chat endpoints using the `@database` command
+    (see `/api/chat` in :mod:`api_server`). When invoked, the agent is
+    executed as the `sql_agent` tool and returns a natural-language answer.
+- For terminal transparency and observability, callers may pass an
+    optional `PipelineTrace` instance (keyword `trace`). When provided the
+    agent appends brief SQL metadata to the trace (e.g. `route_reason`) so
+    the pipeline trace and server logs include the generated SQL used for
+    the query. This helps reproduce and audit database-backed answers.
+
+Security
+--------
+
+Only `SELECT` statements are allowed — the LLM-generated query is
+executed via a read-only API (`execute_readonly_query`) that enforces
+non-mutating behavior.
+
 """
 
 import json

@@ -4,7 +4,7 @@
 
 IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institutional use. It combines a React-based admin dashboard with a RAG pipeline to let students and faculty ask questions about institutional documents. Administrators get real-time analytics, document management, and AI configuration tools.
 
-**Latest Version:** 2.0.0 | **Status:** Production-Ready | **License:** MIT
+**Latest Version:** 2.3.12 | **Status:** Active | **License:** MIT
 
 ---
 
@@ -26,6 +26,8 @@ IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institu
 - 💾 **Conversation Memory** — Intelligent semantic caching for instant responses to similar questions (⚡50-100ms)
 - 🤖 **AI Settings** — Swap GGUF models, tune temperature/tokens, edit system prompts
 - 🩺 **System Health** — Real-time status checks for SQLite, ChromaDB, LLM, embeddings, file storage
+ - 🧾 **Pipeline Trace** — Terminal-visible step-by-step RAG pipeline trace for debugging and demos (also logged to server logs)
+ - 🧩 **SQL Agent (@Database)** — Run privileged SQL queries via `@database` command; results route through the same RAG observability and trace paths.
 
 ---
 

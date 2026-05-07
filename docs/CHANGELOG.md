@@ -4,6 +4,16 @@ All notable changes to IMS AstroBot are documented in this file.
 
 ---
 
+## [2.3.12] - 2026-05-07
+
+### 🛠 Pipeline Trace Improvements
+
+- **`rag/pipeline_trace.py`**: Made terminal traces visible in server logs by emitting a logger entry alongside terminal prints. Improved ANSI-stripping fallback and ensured Unicode-safe output. Fixed ranking and serialization improvements for trace logging.
+
+- **`rag/tools/sql_agent.py`**: Noted SQL agent integration work — `@Database`/`sql_agent` flows now route through the pipeline trace and return results via the same RAG logging/observability paths.
+
+---
+
 ## [2.3.11] - 2026-05-01
 
 ### ✨ New Features

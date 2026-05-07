@@ -122,11 +122,27 @@ def _safe_print(text: str) -> None:
     Fix 2: on UnicodeEncodeError the ANSI escape sequences are stripped first
     so the fallback is clean, readable plain text — not a flood of '?' chars.
     """
+    # Always attempt to print to stdout for interactive devs, but also
+    # emit a logger.info record so Uvicorn/ASGI servers capture the trace
+    # in their logs (prints are sometimes swallowed by process managers).
     try:
-        print(text)
+        print(text, flush=True)
     except UnicodeEncodeError:
         plain = _ANSI_ESCAPE.sub("", text)
+        try:
+            logger.info(plain)
+        except Exception:
+            pass
         print(plain.encode("ascii", errors="replace").decode("ascii"))
+    else:
+        # On success, push a plain (ANSI-stripped) copy to the logger so
+        # the server log contains a readable, non-ANSI version.
+        try:
+            plain = _ANSI_ESCAPE.sub("", text)
+            logger.info(plain)
+        except Exception:
+            # Best-effort logging only; don't raise from the pretty-printer.
+            pass
 
 
 # ── Main class ──────────────────────────────────────────────────────────────
