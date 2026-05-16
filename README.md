@@ -1,10 +1,31 @@
-# 🤖 AstroBot — Open Source RAG Assistant
+# 🤖 IMS AstroBot
 
-An open-source Retrieval-Augmented Generation (RAG) assistant for document-centric Q&A, search, and basic conversational workflows.
+**Institutional AI Assistant — Powered by RAG + Local LLM**
 
-This repository packages a full-stack demo combining a Python FastAPI backend (RAG pipeline + embeddings), a Spring Boot proxy, and a React admin/chat frontend. It is intended as a community-maintained foundation for building document-aware assistants and experiments with local and cloud LLMs.
+IMS AstroBot is a Retrieval-Augmented Generation (RAG) chatbot built for institutional use. It combines a React-based admin dashboard with a RAG pipeline to let students and faculty ask questions about institutional documents. Administrators get real-time analytics, document management, and AI configuration tools.
 
-License: MIT
+**Latest Version:** 2.0.0 | **Status:** Production-Ready | **License:** MIT
+
+---
+
+## ✨ Key Features
+
+### For Students & Faculty
+- 💬 **Smart Q&A** — Ask natural language questions about institutional documents
+- ⚡ **Real-time Streaming** — Responses are delivered token-by-token via SSE for zero perceived latency
+- 🎙️ **Voice-to-Text** — Ask questions via microphone (powered by OpenAI Whisper)
+- 📚 **Source Citations** — Every response includes exact document references
+- ⚡ **Fast Search** — Semantic vector search via ChromaDB (sub-second retrieval)
+- 🔐 **Role-Based Access** — Faculty and student roles with login authentication
+
+### For Administrators  
+- 📄 **Document Management** — Upload, index, search, and delete documents (PDF, DOCX, TXT, XLSX, CSV, PPTX, HTML)
+- 👥 **User Management** — Create users, enable/disable accounts, manage roles (admin/faculty/student)
+- 📊 **Usage Analytics** — Dashboard with total queries, top users, response times, daily trends
+- 📋 **Query Logs** — Inspect recent queries with full responses and source documents
+- 💾 **Conversation Memory** — Intelligent semantic caching for instant responses to similar questions (⚡50-100ms)
+- 🤖 **AI Settings** — Swap GGUF models, tune temperature/tokens, edit system prompts
+- 🩺 **System Health** — Real-time status checks for SQLite, ChromaDB, LLM, embeddings, file storage
 
 ---
 
