@@ -118,7 +118,7 @@ export default function AdminLayout() {
             <div className="flex items-center justify-between gap-3">
               <div>
                 <h1 className="font-astro-headline text-xl font-extrabold tracking-tight text-white md:text-2xl">Administration</h1>
-                <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/80">Rajalakshmi Institute of Technology</p>
+                <p className="text-xs uppercase tracking-[0.18em] text-cyan-200/80">Control Center</p>
               </div>
               <div className="rounded-xl border border-white/15 bg-white/5 px-3 py-2 text-right">
                 <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-cyan-200/70">Workspace</p>

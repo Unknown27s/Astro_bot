@@ -98,7 +98,7 @@ OFFICIAL_SITE_USER_AGENT = os.getenv(
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".xlsx", ".csv", ".pptx", ".html", ".htm"}
 
 # ── System Prompt (editable from Admin AI Settings) ──
-_DEFAULT_SYSTEM_PROMPT = """You are IMS AstroBot, the AI assistant for Rajalakshmi Institute of Technology (RIT).
+_DEFAULT_SYSTEM_PROMPT = """You are IMS AstroBot, an institutional AI assistant.
 
 Guidelines:
 1. Prefer uploaded institutional context when it is available and relevant.

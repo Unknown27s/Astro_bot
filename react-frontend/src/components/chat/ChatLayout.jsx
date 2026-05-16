@@ -612,7 +612,7 @@ export default function ChatLayout() {
                     {activeView === 'announcements' ? 'Announcements' : 'Academic Concierge'}
                   </h1>
                   <p className="text-xs uppercase tracking-[0.24em] text-cyan-200/90">
-                    {activeView === 'announcements' ? 'Institution Broadcasts' : 'Rajalakshmi Institute of Technology'}
+                    {activeView === 'announcements' ? 'Institution Broadcasts' : 'Ask me anything about your campus life'}
                   </p>
                 </div>
               </div>

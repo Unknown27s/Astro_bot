@@ -103,14 +103,14 @@ export default function LoginPage() {
         </motion.section>
 
         <p className="mt-8 text-center text-sm font-medium text-[#505f76]">
-          Secure Gateway for Rajalakshmi Institute of Technology
+          Secure Gateway for AstroBot Teams
         </p>
       </main>
 
       <footer className="relative z-10 mt-auto w-full max-w-7xl px-8 py-7">
         <div className="flex flex-col items-center justify-between gap-4 md:flex-row">
           <p className="text-center text-xs font-medium uppercase tracking-wide text-slate-500 md:text-left">
-            © 2026 Rajalakshmi Institute of Technology. All rights reserved.
+            © AstroBot Teams. All rights reserved.
           </p>
           <div className="flex gap-5">
             <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Privacy Policy</span>

@@ -15,7 +15,7 @@
 
 ## 📋 Executive Summary
 
-This document outlines the complete UI/UX redesign of AstroBot from prototype to production-ready. The redesign focuses on modern, professional aesthetics while maintaining institutional functionality for students and faculty at Rajalakshmi Engineering College.
+This document outlines the complete UI/UX redesign of AstroBot from prototype to production-ready. The redesign focuses on modern, professional aesthetics while maintaining institutional functionality for students and faculty at partner institutions.
 
 ### Design Philosophy
 - **Modern & Professional**: Clean, minimalist design with purple-teal color scheme

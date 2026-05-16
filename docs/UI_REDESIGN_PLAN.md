@@ -1,6 +1,6 @@
 # 🎨 AstroBot v2.0 UI/UX Complete Redesign Plan
 
-**Project:** Rajalakshmi Engineering College AI Assistant (Aadhi)
+**Project:** Institutional AI Assistant (Aadhi)
 **Version:** v2.0 - Production Ready
 **Status:** 🚀 In Progress
 **Last Updated:** April 9, 2026

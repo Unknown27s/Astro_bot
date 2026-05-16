@@ -30,7 +30,7 @@
 
 ### What is AstroBot?
 
-**AstroBot v2.0** is a **Retrieval-Augmented Generation (RAG) system** designed to answer questions about institutional documents through semantic search + AI. It serves students, faculty, and admins of Rajalakshmi Institute of Technology (RIT) / IMS.
+**AstroBot v2.0** is a **Retrieval-Augmented Generation (RAG) system** designed to answer questions about institutional documents through semantic search + AI. It serves students, faculty, and admins at partner institutions and organizational deployments.
 
 **Simple flow:**
 ```
