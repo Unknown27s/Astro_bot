@@ -56,6 +56,8 @@ If you use this project in a product or research context, please follow the MIT 
 
 Prerequisites: Python 3.10+, Node 16+, Java 17+ (for Spring Boot). See `requirements.txt` and `react-frontend/package.json` for exact versions.
 
+### Option 1 — Native (development)
+
 1. Create a Python virtual environment and install dependencies
 
 ```powershell
@@ -64,7 +66,7 @@ python -m venv .venv
 pip install -r requirements.txt
 ```
 
-2. Start the services (development)
+2. Start the services
 
 ```powershell
 # Terminal 1 — FastAPI
@@ -81,6 +83,43 @@ npm run dev
 ```
 
 3. Open the frontend: http://localhost:3000 — admin credentials are defined in `.env` (change immediately).
+
+### Option 2 — Docker (all services)
+
+```bash
+# 1. Copy environment file
+cp .env.example .env
+
+# 2. Start all services
+docker-compose up -d
+
+# 3. Access:
+#    Frontend:  http://localhost:3000
+#    FastAPI:   http://localhost:8000/docs
+#    Streamlit: http://localhost:8501
+```
+
+**Services started by `docker-compose up`:**
+
+| Service | Container | Port(s) | Description |
+|---|---|---|---|
+| `astrobot-api` | Python Backend | `8000` / `8501` | FastAPI REST API + Streamlit UI |
+| `astrobot-backend` | Spring Boot | `8080` | Java proxy bridging frontend → API |
+| `astrobot-frontend` | React + Nginx | `3000` | Admin dashboard |
+
+**Persistent volumes:** `astrobot_data` (SQLite, ChromaDB, uploads), `astrobot_models` (model caches).
+
+### Docker image sizes (approx)
+
+| Image | Size | Notes |
+|---|---|---|
+| `astrobot-api` | **~1–1.5 GB** | Uses `fastembed` (ONNX runtime) instead of PyTorch — **~70% smaller** than sentence-transformers |
+| `astrobot-backend` | ~250 MB | Eclipse Temurin JRE 17 + Spring Boot fat jar |
+| `astrobot-frontend` | ~60 MB | Multi-stage build: Node builder → Nginx static serve |
+
+**Total disk usage:** ~1.3–1.8 GB for all images.
+
+> **Why was the image shrunk?** Replaced `sentence-transformers` (PyTorch-based, ~2 GB) with `fastembed` (ONNX-based, ~50 MB). This cut the Python image from ~5 GB down to ~1.5 GB. No other functionality was lost — same `all-MiniLM-L6-v2` model, same accuracy.
 
 ---
 

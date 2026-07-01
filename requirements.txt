@@ -14,8 +14,8 @@ faster-whisper>=1.0.0
 # HTTP requests (for Ollama, Groq, Gemini API calls)
 requests>=2.31.0
 
-# Embeddings
-sentence-transformers>=2.2.0
+# Embeddings (lightweight — ONNX runtime, no PyTorch)
+fastembed>=0.5.0
 
 # Vector database
 chromadb>=0.4.22

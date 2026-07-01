@@ -1,0 +1,52 @@
+services:
+  astrobot-api:
+    build: .
+    container_name: astrobot-api
+    ports:
+      - "8000:8000"
+      - "8501:8501"
+    env_file:
+      - .env
+    environment:
+      - SQLITE_DB_PATH=/app/data/astrobot.db
+      - CHROMA_PERSIST_DIR=/app/data/chroma_db
+      - UPLOAD_DIR=/app/data/uploads
+    volumes:
+      - astrobot_data:/app/data
+      - astrobot_models:/root/.cache
+    command: >
+      sh -c "uvicorn api_server:app --host 0.0.0.0 --port 8000 &
+             streamlit run app.py --server.port 8501 --server.address 0.0.0.0"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/docs')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  astrobot-backend:
+    build: ./springboot-backend
+    container_name: astrobot-backend
+    ports:
+      - "8080:8080"
+    environment:
+      - PYTHON_API_URL=http://astrobot-api:8000
+    depends_on:
+      astrobot-api:
+        condition: service_healthy
+    restart: unless-stopped
+
+  astrobot-frontend:
+    build: ./react-frontend
+    container_name: astrobot-frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - API_URL=http://astrobot-backend:8080
+    depends_on:
+      - astrobot-backend
+    restart: unless-stopped
+
+volumes:
+  astrobot_data:
+  astrobot_models:

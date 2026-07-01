@@ -9,13 +9,10 @@ import threading
 from typing import Any
 import chromadb
 from chromadb.config import Settings
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 from config import CHROMA_PERSIST_DIR, EMBEDDING_MODEL
 
 logger = logging.getLogger(__name__)
-
-# Use cached model files without making network requests
-os.environ.setdefault("HF_HUB_OFFLINE", "1")
 
 # ── Thread-safe singletons ──
 _embedding_model = None
@@ -24,8 +21,8 @@ _model_lock = threading.Lock()
 _chroma_lock = threading.Lock()
 
 
-def get_embedding_model() -> SentenceTransformer:
-    """Load embedding model. Thread-safe singleton."""
+def get_embedding_model() -> TextEmbedding:
+    """Load embedding model. Thread-safe singleton (fastembed / ONNX)."""
     global _embedding_model
     if _embedding_model is not None:
         return _embedding_model
@@ -33,7 +30,7 @@ def get_embedding_model() -> SentenceTransformer:
         if _embedding_model is not None:
             return _embedding_model
         logger.info(f"Loading embedding model: {EMBEDDING_MODEL}...")
-        _embedding_model = SentenceTransformer(EMBEDDING_MODEL)
+        _embedding_model = TextEmbedding(model_name=EMBEDDING_MODEL)
         logger.info("Embedding model loaded successfully")
         return _embedding_model
 
@@ -76,10 +73,10 @@ def _invalidate_retrieval_cache() -> None:
 
 
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings for a list of texts."""
+    """Generate embeddings for a list of texts (fastembed / ONNX)."""
     model = get_embedding_model()
-    embeddings = model.encode(texts, show_progress_bar=False, normalize_embeddings=True)
-    return embeddings.tolist()
+    embeddings = list(model.embed(texts))
+    return [e.tolist() for e in embeddings]
 
 
 def store_chunks(chunks: list[dict], doc_id: str) -> int:
