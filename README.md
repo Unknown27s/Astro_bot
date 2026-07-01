@@ -135,14 +135,33 @@ Before larger changes, open an issue to discuss design and compatibility.
 
 ---
 
-## Where to look in the repo
+## Project structure
 
-- Python API: `api_server.py`, `rag/`, `ingestion/`, `database/`
-- React UI: `react-frontend/src/` (pages, components, services)
-- Spring Boot proxy: `springboot-backend/src/main/java/`
-- Docs: `docs/` (architecture and guides)
-
----
+```
+astrobot/
+├── app.py                      # Streamlit entry point
+├── api_server.py               # FastAPI REST API
+├── config.py                   # Central configuration
+├── requirements.txt
+├── Dockerfile / docker-compose.yml
+│
+├── auth/                       # Auth logic (login, session)
+├── database/                   # SQLite + institute DB layers
+├── ingestion/                  # Document parsing, chunking, embedding
+├── middleware/                  # Rate limiting, request tracking
+├── rag/                        # Retrieval, generation, providers, memory
+├── views/                      # Streamlit UI pages
+├── log_config/                 # Logging + Sentry setup
+│
+├── scripts/                    # Utilities: launcher, verify, start/stop servers
+├── tests/                      # Standalone test scripts
+├── testing/                    # Test framework (pytest suite)
+├── react-frontend/             # React admin dashboard
+├── springboot-backend/         # Spring Boot proxy layer
+│
+├── docs/                       # Architecture, guides, API reference
+└── data/                       # Runtime data (SQLite, ChromaDB, uploads)
+```
 
 ## Privacy & Data
 
