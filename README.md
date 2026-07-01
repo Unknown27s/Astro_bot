@@ -166,13 +166,3 @@ astrobot/
 ## Privacy & Data
 
 This repository includes upload and storage code for documents and embeddings. Treat uploaded documents as potentially sensitive: do not store secrets in uploaded files and configure proper access controls when deploying.
-
----
-
-If you'd like, I can also:
-
-- Remove or anonymize institute-specific strings across the codebase (config, docs, test artifacts)
-- Add a CONTRIBUTING.md and CODE_OF_CONDUCT.md
-- Replace default credentials and example `.env` values with safer defaults
-
-Tell me which of the above you'd like next.
