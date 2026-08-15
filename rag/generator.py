@@ -6,22 +6,29 @@ Falls back to context-only mode if no provider is available.
 
 import logging
 import time
-from typing import Optional
+from typing import Any, Dict, Iterator, List, Optional
+
 from tests.config import MODEL_MAX_TOKENS, MODEL_TEMPERATURE, SYSTEM_PROMPT, CONV_ENABLED
-from rag.providers.manager import get_manager, reset_manager
+from rag.providers.manager import get_manager
 from rag.memory import query_memory, add_memory_entry
-from rag.observability.trace_context import get_obs_trace
 
 logger = logging.getLogger(__name__)
 
+# Rough heuristic: ~4 characters per token (better than word-count, still cheap).
+CHARS_PER_TOKEN = 4
 
-def _estimate_tokens(text: str) -> int:
-    """Estimate token count using simple heuristic: ~4 chars per token."""
-    return max(1, len(text.split()) // 1) if text else 0
+UNAVAILABLE_MESSAGE = "I am unable to generate a response right now. Please try again in a moment."
+
+
+def _estimate_tokens(text: Optional[str]) -> int:
+    """Estimate token count using a simple heuristic: ~4 chars per token."""
+    if not text:
+        return 0
+    return max(1, len(text) // CHARS_PER_TOKEN)
 
 
 # ---------------------------------------------------------------------------
-# Memory helpers — shared by both generate functions
+# Memory helpers — shared by all generate functions
 # ---------------------------------------------------------------------------
 
 def _check_memory(query: str, user_id: Optional[str], label: str = "") -> Optional[dict]:
@@ -33,16 +40,16 @@ def _check_memory(query: str, user_id: Optional[str], label: str = "") -> Option
         return None
     try:
         return query_memory(query, user_id=user_id)
-    except Exception as e:
+    except Exception:
         prefix = f"[{label}] " if label else ""
-        logger.warning(f"{prefix}Memory query failed: {e}")
+        logger.warning(f"{prefix}Memory query failed", exc_info=True)
         return None
 
 
 def _store_memory(
     query: str,
     result: str,
-    sources: list,
+    sources: List[Dict[str, Any]],
     user_id: Optional[str],
     label: str = "",
 ) -> Optional[str]:
@@ -55,10 +62,97 @@ def _store_memory(
     try:
         entry = add_memory_entry(query=query, response=result, sources=sources, user_id=user_id)
         return entry.get("id") if isinstance(entry, dict) else None
-    except Exception as e:
+    except Exception:
         prefix = f"[{label}] " if label else ""
-        logger.warning(f"{prefix}Failed to store response in memory: {e}")
+        logger.warning(f"{prefix}Failed to store response in memory", exc_info=True)
         return None
+
+
+def _memory_hit_payload(memory_result: dict, start_time: float, label: str) -> dict:
+    """Build the return payload for a memory cache hit, with consistent logging."""
+    elapsed = (time.time() - start_time) * 1000
+    prefix = f"[{label}] " if label else ""
+    logger.info(f"{prefix}Memory cache hit - returned in {elapsed:.1f}ms")
+    return {
+        "response": memory_result["response"],
+        "from_memory": True,
+        "memory_id": memory_result.get("memory_id"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# Prompt builders
+# ---------------------------------------------------------------------------
+
+def _build_rag_prompt(query: str, context: str, user_context: Optional[str]) -> str:
+    message = (
+        "Based on the following institutional documents, answer the question accurately.\n\n"
+        f"CONTEXT:\n{context}\n\n"
+        f"QUESTION: {query}"
+    )
+    if user_context:
+        message = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n" + message
+        )
+    return message
+
+
+def _build_direct_prompt(query: str, user_context: Optional[str]) -> str:
+    message = (
+        "Answer the user naturally and helpfully. "
+        "If the question is about IMS/RIT institution details, mention that official "
+        "documents may provide the most accurate answer.\n\n"
+        f"USER QUESTION: {query}"
+    )
+    if user_context:
+        message = (
+            "Use the student context to personalize the answer when relevant.\n\n"
+            f"STUDENT CONTEXT:\n{user_context}\n\n" + message
+        )
+    return message
+
+
+# ---------------------------------------------------------------------------
+# Observability helpers — now used consistently by every generate function,
+# including the streaming and "direct" variants (previously only
+# generate_response created/ended a span).
+# ---------------------------------------------------------------------------
+
+def _start_span(obs_trace, name: str, query: str, route_mode: Optional[str], extra_input: Optional[dict] = None):
+    if not (obs_trace and hasattr(obs_trace, "start_span")):
+        return None
+    try:
+        input_payload = {"query": (query or "")[:200]}
+        if extra_input:
+            input_payload.update(extra_input)
+        return obs_trace.start_span(
+            name=name,
+            input_payload=input_payload,
+            metadata={"route_mode": route_mode},
+        )
+    except Exception:
+        logger.debug("Failed to start observability span", exc_info=True)
+        return None
+
+
+def _end_span(span, response_text: str, from_memory: bool, start_time: float, extra_metadata: Optional[dict] = None):
+    if not span:
+        return
+    try:
+        metadata = {
+            "from_memory": from_memory,
+            "elapsed_ms": round((time.time() - start_time) * 1000, 2),
+            "tokens_output": _estimate_tokens(response_text),
+        }
+        if extra_metadata:
+            metadata.update(extra_metadata)
+        span.end(
+            output={"response_length": len(response_text) if response_text else 0},
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("Failed to end observability span", exc_info=True)
 
 
 # ---------------------------------------------------------------------------
@@ -95,7 +189,7 @@ def generate_response(
     query: str,
     context: str,
     user_id: Optional[str] = None,
-    sources: Optional[list] = None,
+    sources: Optional[List[Dict[str, Any]]] = None,
     user_context: Optional[str] = None,
     skip_memory: bool = False,
     trace=None,
@@ -112,7 +206,7 @@ def generate_response(
         context: Formatted context from retrieved documents
         user_id: User ID for per-user memory scoping (optional)
         sources: List of source documents used in context
-        trace: Optional pipeline trace object (accepted for compatibility)
+        trace: Optional pipeline trace object (accepted for compatibility, unused)
         obs_trace: Optional observability trace object (accepted for compatibility)
         route_mode: Optional route mode label (accepted for compatibility)
 
@@ -120,56 +214,28 @@ def generate_response(
         Dictionary with keys: response (str), from_memory (bool), memory_id (str or None)
     """
     start_time = time.time()
-    obs_span = None
+    sources = sources or []
 
-    if obs_trace and hasattr(obs_trace, "start_span"):
-        try:
-            obs_span = obs_trace.start_span(
-                name="rag.generate_response",
-                input_payload={"query": query[:200], "context_length": len(context)},
-                metadata={"route_mode": route_mode}
-            )
-        except Exception:
-            pass
+    if not query or not query.strip():
+        logger.warning("generate_response called with empty query")
+        return {"response": "", "from_memory": False, "memory_id": None}
+
+    obs_span = _start_span(
+        obs_trace, "rag.generate_response", query, route_mode,
+        extra_input={"context_length": len(context or "")},
+    )
 
     # Step 1: Check conversation memory
     if not skip_memory:
         memory_result = _check_memory(query, user_id)
         if memory_result:
-            elapsed = (time.time() - start_time) * 1000
-            logger.info(f"Memory cache hit - returned in {elapsed:.1f}ms")
-            if obs_span:
-                try:
-                    obs_span.end(
-                        output={"response_length": len(memory_result["response"])},
-                        metadata={
-                            "from_memory": True,
-                            "elapsed_ms": round(elapsed, 2),
-                            "tokens_output": _estimate_tokens(memory_result["response"]),
-                        }
-                    )
-                except Exception:
-                    pass
-            return {
-                "response": memory_result["response"],
-                "from_memory": True,
-                "memory_id": memory_result.get("memory_id"),
-            }
+            payload = _memory_hit_payload(memory_result, start_time, label="")
+            _end_span(obs_span, payload["response"], from_memory=True, start_time=start_time)
+            return payload
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
-
-    user_message = (
-        "Based on the following institutional documents, answer the question accurately.\n\n"
-        f"CONTEXT:\n{context}\n\n"
-        f"QUESTION: {query}"
-    )
-    if user_context:
-        user_message = (
-            "Use the student context to personalize the answer when relevant.\n\n"
-            f"STUDENT CONTEXT:\n{user_context}\n\n"
-            + user_message
-        )
+    user_message = _build_rag_prompt(query, context, user_context)
 
     logger.debug(f"Generating response for query: {query[:100]}...")
     gen_start = time.time()
@@ -190,25 +256,18 @@ def generate_response(
         result = _fallback_response(query, context)
 
     # Step 4: Record observability span
-    if obs_span:
-        try:
-            obs_span.end(
-                output={"response_length": len(result) if result else 0},
-                metadata={
-                    "from_memory": False,
-                    "generation_time_ms": round(gen_elapsed, 2),
-                    "tokens_input": _estimate_tokens(user_message),
-                    "tokens_output": _estimate_tokens(result) if result else 0,
-                    "elapsed_ms": round((time.time() - start_time) * 1000, 2),
-                }
-            )
-        except Exception:
-            pass
+    _end_span(
+        obs_span, result, from_memory=False, start_time=start_time,
+        extra_metadata={
+            "generation_time_ms": round(gen_elapsed, 2),
+            "tokens_input": _estimate_tokens(user_message),
+        },
+    )
 
     # Step 5: Store in memory and always return the result
     memory_id = None
     if not skip_memory:
-        memory_id = _store_memory(query, result, sources or [], user_id)
+        memory_id = _store_memory(query, result, sources, user_id)
     return {
         "response": result,
         "from_memory": False,
@@ -220,82 +279,104 @@ def generate_response_stream(
     query: str,
     context: str,
     user_id: Optional[str] = None,
-    sources: Optional[list] = None,
+    sources: Optional[List[Dict[str, Any]]] = None,
     user_context: Optional[str] = None,
     skip_memory: bool = False,
     trace=None,
     obs_trace=None,
     route_mode: Optional[str] = None,
     **kwargs,
-):
+) -> Iterator[dict]:
     """
     Generate a response stream using the configured LLM provider(s) with retrieved context.
     Yields dicts with chunk data.
     """
     start_time = time.time()
+    sources = sources or []
+
+    if not query or not query.strip():
+        logger.warning("generate_response_stream called with empty query")
+        yield {"chunk": "", "from_memory": False, "done": True}
+        return
+
+    obs_span = _start_span(
+        obs_trace, "rag.generate_response_stream", query, route_mode,
+        extra_input={"context_length": len(context or "")},
+    )
 
     # Step 1: Check conversation memory
     if not skip_memory:
         memory_result = _check_memory(query, user_id)
         if memory_result:
+            payload = _memory_hit_payload(memory_result, start_time, label="stream")
+            _end_span(obs_span, payload["response"], from_memory=True, start_time=start_time)
             yield {
-                "chunk": memory_result["response"],
+                "chunk": payload["response"],
                 "from_memory": True,
-                "memory_id": memory_result.get("memory_id"),
+                "memory_id": payload["memory_id"],
                 "done": True,
             }
             return
 
     # Step 2: Generate response via LLM provider
     mgr = get_manager()
+    user_message = _build_rag_prompt(query, context, user_context)
 
-    user_message = (
-        "Based on the following institutional documents, answer the question accurately.\n\n"
-        f"CONTEXT:\n{context}\n\n"
-        f"QUESTION: {query}"
-    )
-    if user_context:
-        user_message = (
-            "Use the student context to personalize the answer when relevant.\n\n"
-            f"STUDENT CONTEXT:\n{user_context}\n\n"
-            + user_message
-        )
-
+    gen_start = time.time()
     full_response = ""
-    stream = mgr.generate_stream(
-        system_prompt=SYSTEM_PROMPT,
-        user_message=user_message,
-        temperature=MODEL_TEMPERATURE,
-        max_tokens=MODEL_MAX_TOKENS,
-    )
+    stream_failed = False
+
+    try:
+        stream = mgr.generate_stream(
+            system_prompt=SYSTEM_PROMPT,
+            user_message=user_message,
+            temperature=MODEL_TEMPERATURE,
+            max_tokens=MODEL_MAX_TOKENS,
+        )
+    except Exception:
+        logger.warning("Failed to start LLM stream, using fallback response", exc_info=True)
+        stream = None
 
     if stream is None:
         logger.warning("All LLM providers failed streaming, using fallback response")
         full_response = _fallback_response(query, context)
-        yield {
-            "chunk": full_response,
-            "from_memory": False,
-            "done": True,
-        }
+        yield {"chunk": full_response, "from_memory": False, "done": True}
     else:
-        for chunk in stream:
-            full_response += chunk
-            yield {
-                "chunk": chunk,
-                "from_memory": False,
-                "done": False,
-            }
-        
+        try:
+            for chunk in stream:
+                full_response += chunk
+                yield {"chunk": chunk, "from_memory": False, "done": False}
+        except Exception:
+            # Stream started but broke partway through — don't let the raw
+            # exception propagate to the caller; close out gracefully with
+            # whatever we managed to generate (or a fallback if nothing yet).
+            logger.warning("LLM stream failed mid-response", exc_info=True)
+            stream_failed = True
+            if not full_response:
+                full_response = _fallback_response(query, context)
+                yield {"chunk": full_response, "from_memory": False, "done": False}
+
         memory_id = None
         if not skip_memory:
-            memory_id = _store_memory(query, full_response, sources or [], user_id)
+            memory_id = _store_memory(query, full_response, sources, user_id)
         yield {
             "chunk": "",
             "from_memory": False,
             "memory_id": memory_id,
             "done": True,
+            "stream_failed": stream_failed,
         }
 
+    gen_elapsed = (time.time() - gen_start) * 1000
+    logger.info(f"LLM stream generation completed in {gen_elapsed:.1f}ms")
+    _end_span(
+        obs_span, full_response, from_memory=False, start_time=start_time,
+        extra_metadata={
+            "generation_time_ms": round(gen_elapsed, 2),
+            "tokens_input": _estimate_tokens(user_message),
+            "stream_failed": stream_failed,
+        },
+    )
 
 
 def generate_response_direct(
@@ -315,41 +396,45 @@ def generate_response_direct(
     """
     start_time = time.time()
 
+    if not query or not query.strip():
+        logger.warning("generate_response_direct called with empty query")
+        return {"response": "", "from_memory": False, "memory_id": None}
+
+    obs_span = _start_span(obs_trace, "rag.generate_response_direct", query, route_mode)
+
     # Step 1: Check conversation memory
     if not skip_memory:
         memory_result = _check_memory(query, user_id, label="direct")
         if memory_result:
-            elapsed = (time.time() - start_time) * 1000
-            logger.info(f"Direct mode memory cache hit - returned in {elapsed:.1f}ms")
-            return {
-                "response": memory_result["response"],
-                "from_memory": True,
-                "memory_id": memory_result.get("memory_id"),
-            }
+            payload = _memory_hit_payload(memory_result, start_time, label="direct")
+            _end_span(obs_span, payload["response"], from_memory=True, start_time=start_time)
+            return payload
 
     # Step 2: Generate response
     mgr = get_manager()
-    direct_prompt = (
-        "Answer the user naturally and helpfully. "
-        "If the question is about IMS/RIT institution details, mention that official documents may provide the most accurate answer.\n\n"
-        f"USER QUESTION: {query}"
-    )
-    if user_context:
-        direct_prompt = (
-            "Use the student context to personalize the answer when relevant.\n\n"
-            f"STUDENT CONTEXT:\n{user_context}\n\n"
-            + direct_prompt
-        )
+    direct_prompt = _build_direct_prompt(query, user_context)
 
+    gen_start = time.time()
     result = mgr.generate(
         system_prompt=SYSTEM_PROMPT,
         user_message=direct_prompt,
         temperature=MODEL_TEMPERATURE,
         max_tokens=MODEL_MAX_TOKENS,
     )
+    gen_elapsed = (time.time() - gen_start) * 1000
+    logger.info(f"Direct LLM generation completed in {gen_elapsed:.1f}ms")
 
     if result is None:
-        result = "I am unable to generate a response right now. Please try again in a moment."
+        logger.warning("All LLM providers failed (direct mode), using fallback response")
+        result = UNAVAILABLE_MESSAGE
+
+    _end_span(
+        obs_span, result, from_memory=False, start_time=start_time,
+        extra_metadata={
+            "generation_time_ms": round(gen_elapsed, 2),
+            "tokens_input": _estimate_tokens(direct_prompt),
+        },
+    )
 
     # Step 3: Store in memory and always return the result
     memory_id = None
@@ -371,61 +456,66 @@ def generate_response_direct_stream(
     obs_trace=None,
     route_mode: Optional[str] = None,
     **kwargs,
-):
+) -> Iterator[dict]:
     """
     Generate a direct LLM response stream without retrieval context.
     """
     start_time = time.time()
 
+    if not query or not query.strip():
+        logger.warning("generate_response_direct_stream called with empty query")
+        yield {"chunk": "", "from_memory": False, "done": True}
+        return
+
+    obs_span = _start_span(obs_trace, "rag.generate_response_direct_stream", query, route_mode)
+
     # Step 1: Check conversation memory
     if not skip_memory:
         memory_result = _check_memory(query, user_id, label="direct")
         if memory_result:
+            payload = _memory_hit_payload(memory_result, start_time, label="direct-stream")
+            _end_span(obs_span, payload["response"], from_memory=True, start_time=start_time)
             yield {
-                "chunk": memory_result["response"],
+                "chunk": payload["response"],
                 "from_memory": True,
-                "memory_id": memory_result.get("memory_id"),
+                "memory_id": payload["memory_id"],
                 "done": True,
             }
             return
 
     # Step 2: Generate response
     mgr = get_manager()
-    direct_prompt = (
-        "Answer the user naturally and helpfully. "
-        "If the question is about IMS/RIT institution details, mention that official documents may provide the most accurate answer.\n\n"
-        f"USER QUESTION: {query}"
-    )
-    if user_context:
-        direct_prompt = (
-            "Use the student context to personalize the answer when relevant.\n\n"
-            f"STUDENT CONTEXT:\n{user_context}\n\n"
-            + direct_prompt
-        )
+    direct_prompt = _build_direct_prompt(query, user_context)
 
+    gen_start = time.time()
     full_response = ""
-    stream = mgr.generate_stream(
-        system_prompt=SYSTEM_PROMPT,
-        user_message=direct_prompt,
-        temperature=MODEL_TEMPERATURE,
-        max_tokens=MODEL_MAX_TOKENS,
-    )
+    stream_failed = False
+
+    try:
+        stream = mgr.generate_stream(
+            system_prompt=SYSTEM_PROMPT,
+            user_message=direct_prompt,
+            temperature=MODEL_TEMPERATURE,
+            max_tokens=MODEL_MAX_TOKENS,
+        )
+    except Exception:
+        logger.warning("Failed to start direct LLM stream, using fallback response", exc_info=True)
+        stream = None
 
     if stream is None:
-        full_response = "I am unable to generate a response right now. Please try again in a moment."
-        yield {
-            "chunk": full_response,
-            "from_memory": False,
-            "done": True,
-        }
+        full_response = UNAVAILABLE_MESSAGE
+        yield {"chunk": full_response, "from_memory": False, "done": True}
     else:
-        for chunk in stream:
-            full_response += chunk
-            yield {
-                "chunk": chunk,
-                "from_memory": False,
-                "done": False,
-            }
+        try:
+            for chunk in stream:
+                full_response += chunk
+                yield {"chunk": chunk, "from_memory": False, "done": False}
+        except Exception:
+            logger.warning("Direct LLM stream failed mid-response", exc_info=True)
+            stream_failed = True
+            if not full_response:
+                full_response = UNAVAILABLE_MESSAGE
+                yield {"chunk": full_response, "from_memory": False, "done": False}
 
         memory_id = None
         if not skip_memory:
@@ -435,7 +525,19 @@ def generate_response_direct_stream(
             "from_memory": False,
             "memory_id": memory_id,
             "done": True,
+            "stream_failed": stream_failed,
         }
+
+    gen_elapsed = (time.time() - gen_start) * 1000
+    logger.info(f"Direct LLM stream generation completed in {gen_elapsed:.1f}ms")
+    _end_span(
+        obs_span, full_response, from_memory=False, start_time=start_time,
+        extra_metadata={
+            "generation_time_ms": round(gen_elapsed, 2),
+            "tokens_input": _estimate_tokens(direct_prompt),
+            "stream_failed": stream_failed,
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -447,7 +549,7 @@ def _fallback_response(query: str, context: str) -> str:
     Fallback response when no LLM provider is available.
     Returns the retrieved context in a formatted way.
     """
-    if "No relevant documents found" in context:
+    if not context or "No relevant documents found" in context:
         return (
             "⚠️ **No LLM provider available** and no relevant documents were found.\n\n"
             "Please ask your administrator to:\n"
